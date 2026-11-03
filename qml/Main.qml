@@ -17,14 +17,38 @@ Window {
     minimumWidth: 420
     minimumHeight: 360
     visible: true
-    title: reader.title ? `${reader.title} — Dogear` : "Dogear"
-    color: ReadingTheme.background
+    title: mode === "reader" && reader.title ? `${reader.title} — Dogear` : "Dogear"
+    color: mode === "reader" ? ReadingTheme.background : Theme.surface
+
+    // "library" or "reader"
+    property string mode: "library"
 
     Behavior on color {
         ColorAnimation {
             duration: Theme.animNormal
         }
     }
+
+    readonly property var libraryBindings: [
+        ["h j k l  arrows", "Move"],
+        ["gg  G", "First, last book"],
+        ["Ctrl+d  Ctrl+u", "Half a page down, up"],
+        ["Enter  o", "Read, or open a series"],
+        ["q  Backspace", "Out of a series"],
+        ["/", "Filter by title, author or series"],
+        ["t", "Show one tag's books"],
+        ["s  S", "Next, previous sort"],
+        ["v", "Covers or list"],
+        ["z", "Series stacked or not"],
+        ["Space", "Select"],
+        ["e", "Series of the selection or this book"],
+        ["T", "Tags of the selection or this book"],
+        ["Esc", "Let go: selection, filter, tag, series"],
+        ["a", "Add books (copied into the library folder)"],
+        ["R", "Look for new books"],
+        ["?  F1", "These keys"],
+        ["q  Ctrl+w", "Quit"]
+    ]
 
     readonly property var bindings: [
         ["l  Right  Space", "Next page"],
@@ -42,7 +66,8 @@ Window {
         ["o", "Open a book"],
         ["F11  f", "Full screen"],
         ["?  F1", "These keys"],
-        ["q  Ctrl+w", "Close"]
+        ["q", "Back to the library"],
+        ["Ctrl+w", "Quit"]
     ]
 
     property bool pendingG: false
@@ -61,13 +86,34 @@ Window {
     }
 
     function openBook(path) {
-        if (reader.openFile(path))
-            toc.open = false;
+        if (!reader.openFile(path))
+            return;
+        toc.open = false;
+        fonts.open = false;
+        mode = "reader";
+        reader.focusPage();
+    }
+
+    function showLibrary() {
+        toc.open = false;
+        fonts.open = false;
+        mode = "library";
+        library.select(reader.bookId);
+        keyCatcher.forceActiveFocus();
+    }
+
+    function addFiles(urls) {
+        const n = Library.add(urls);
+        toast(n === 0 ? "No books added" : n === 1 ? "Added a book" : `Added ${n} books`);
     }
 
     function handleKey(e) {
+        if (inputDialog.open)
+            return inputDialog.handleKey(e);
         if (help.open)
             return help.handleKey(e);
+        if (tagPanel.open)
+            return tagPanel.handleKey(e);
         if (toc.open)
             return toc.handleKey(e);
         if (fonts.open)
@@ -76,6 +122,24 @@ Window {
         const t = e.text;
         const ctrl = e.modifiers & Qt.ControlModifier;
         const shift = e.modifiers & Qt.ShiftModifier;
+
+        if (ctrl && (e.key === Qt.Key_W || e.key === Qt.Key_Q)) {
+            win.close();
+            return true;
+        }
+        if (t === "?" || e.key === Qt.Key_F1) {
+            help.open = true;
+            return true;
+        }
+        if (mode === "library") {
+            if (library.handleKey(e))
+                return true;
+            if (t === "q") {
+                win.close();
+                return true;
+            }
+            return false;
+        }
 
         if (t === "g" && !ctrl) {
             if (pendingG) {
@@ -183,7 +247,7 @@ Window {
             help.open = true;
             return true;
         case "q":
-            win.close();
+            showLibrary();
             return true;
         }
 
@@ -235,25 +299,52 @@ Window {
         id: reader
 
         anchors.fill: parent
-        visible: hasBook
+        visible: win.mode === "reader" && hasBook
         onKeyPressed: event => win.handleKey(event)
         onFailed: message => win.toast(message)
     }
 
-    EmptyPage {
+    LibraryView {
+        id: library
+
         anchors.fill: parent
-        visible: !reader.hasBook
+        visible: win.mode === "library"
+        onOpenBook: path => win.openBook(path)
+        onAddBooks: addDialog.open()
+        onToast: message => win.toast(message)
+        onKeysBack: keyCatcher.forceActiveFocus()
+        dialog: inputDialog
+        tagPanel: tagPanel
+    }
+
+    TagPanel {
+        id: tagPanel
+
+        onChosen: tag => {
+            library.tag = tag;
+            library.setCurrent(0);
+        }
+        onKeysBack: keyCatcher.forceActiveFocus()
+    }
+
+    InputDialog {
+        id: inputDialog
+
+        onClosed: keyCatcher.forceActiveFocus()
     }
 
     DropArea {
         anchors.fill: parent
         keys: ["text/uri-list"]
+        // Into the library; in the reader, the first is also opened
         onDropped: drop => {
-            const url = drop.urls.find(u => u.toString().toLowerCase().endsWith(".epub"));
-            if (url) {
-                drop.accept();
-                win.openBook(url.toString());
-            }
+            const urls = drop.urls.map(u => u.toString()).filter(u => u.toLowerCase().endsWith(".epub"));
+            if (urls.length === 0)
+                return;
+            drop.accept();
+            win.addFiles(urls);
+            if (win.mode === "reader")
+                win.openBook(urls[0]);
         }
     }
 
@@ -277,8 +368,8 @@ Window {
     KeyHelp {
         id: help
 
-        bindings: win.bindings
-        onOpenChanged: if (!open && reader.hasBook)
+        bindings: win.mode === "library" ? win.libraryBindings : win.bindings
+        onOpenChanged: if (!open && reader.hasBook && win.mode === "reader")
             reader.focusPage()
     }
 
@@ -325,9 +416,19 @@ Window {
         onAccepted: win.openBook(selectedFile.toString())
     }
 
+    FileDialog {
+        id: addDialog
+
+        title: "Add books"
+        fileMode: FileDialog.OpenFiles
+        nameFilters: ["EPUB books (*.epub)"]
+        onAccepted: win.addFiles(selectedFiles.map(u => u.toString()))
+    }
+
+    // A book given on the command line opens; otherwise the library, on
+    // the book read last (first in its default order)
     Component.onCompleted: {
-        const start = Library.startFile || Library.lastBook();
-        if (start)
-            openBook(start);
+        if (Library.startFile)
+            openBook(Library.startFile);
     }
 }

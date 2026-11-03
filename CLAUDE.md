@@ -5,7 +5,7 @@ An ebook reader and library, like Foliate but ours. App ID `io.github.anisthdev.
 ## Phases
 
 1. **Reader core** (done): open an EPUB, pages or scrolling, colour schemes, contents, position saved and restored, keys.
-2. **Library**: folders (default `~/Books`) indexed in place and watched; importing copies into the main folder. Cover grid and list, sort, `/` filter, continue reading. EPUB metadata read in C++ (libzip + QXmlStreamReader).
+2. **Library** (done): folders indexed in place and watched; adding copies into the first folder. Cover grid and list, sort, `/` filter; it opens on the book read last.
 3. **Annotations**: highlights, notes, bookmarks (foliate-js `Overlayer`, CFI ranges in SQLite), panel, Markdown export.
 4. **Search**: in the book (foliate-js `search.js`), across the library (SQLite FTS5).
 5. **Metadata online**: Open Library, then Google Books, EPUB's own as fallback. ISBN matches apply by themselves; title searches show a picker. Hand edits are never overwritten.
@@ -17,7 +17,7 @@ An ebook reader and library, like Foliate but ours. App ID `io.github.anisthdev.
 
 ```
 cmake -S . -B build -G Ninja && cmake --build build
-build/dogear [book.epub]     # no book: reopens the last one
+build/dogear [book.epub]     # no book: the library
 makepkg -si                  # installs totoro-dogear (provides dogear)
 ```
 
@@ -27,7 +27,10 @@ There's no live reload as in the Quickshell apps: QML and the reader page are co
 
 ```
 src/main.cpp           WebEngine set-up (must come before the app), command line, scheme handler, QML
-src/Library.*          QML singleton: SQLite ($XDG_DATA_HOME/dogear/library.db), book ids, progress
+src/Library.*          QML singleton: the books QML sees, folders, watching, opening, progress, adding
+src/Database.*         the SQLite file ($XDG_DATA_HOME/dogear/library.db), its schema (user_version), cover thumbnails
+src/Scanner.*          library scan on its own thread; record() hashes, reads and upserts one file
+src/Epub.*             what an EPUB says (OPF metadata, series, cover), read from the zip with libzip
 src/SchemeHandler.*    dogear://app/...: reader page from :/reader, qwebchannel.js, books as /book/<id>
 src/TextFile.*         watched text file (Quickshell's FileView isn't available here): colors.css, fonts.conf
 src/WindowWatch.*      signals when the window is shown again (blank page after a hidden workspace)
@@ -35,13 +38,27 @@ qml/Main.qml           the window, overlays, every key binding (handleKey)
 qml/Theme.qml          singleton: app palette (matugen or Material baseline), fonts, motion
 qml/ReadingTheme.qml   singleton: page colours and type, settings in $XDG_CONFIG_HOME/dogear/dogear.conf
 qml/KeyEvents.qml      singleton: the page's key events as Qt-style ones
-qml/views/             Reader (web view + bars + bridge), TocPanel, EmptyPage
-qml/components/        Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
+qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel
+qml/components/        Cover (rounded, placeholder card); Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
 reader/index.html, reader.js   the page: foliate-js driven over the web channel
 reader/foliate/        foliate-js, vendored (commit in VERSION, MIT); don't edit, update whole
 ```
 
 Every QML file imports `Dogear` (its own module) rather than relative paths. Singletons need `QT_QML_SINGLETON_TYPE` set **before** `qt_add_qml_module` in CMakeLists.txt, or they register as plain types and every property reads undefined.
+
+## The library
+
+- Folders: `[library] folders` in dogear.conf. First run: whichever of ~/Books, ~/Ebooks, ~/eBooks, ~/Documents/Books exist, else a new ~/Books.
+- Rows are keyed by the file's SHA-256: a moved or renamed file keeps its place; a file gone is `missing` (hidden, kept); a file changed in place gets a new row that takes the old one's reading. A scan skips files with the same path, size and mtime whose `scanned` is at least `Scanner::version`; bump the version when `Epub::read` or what's stored changes, and every book is read again.
+- Books opened from outside the folders (command line, `o`) are recorded too and show in the library while their file exists.
+- The watcher covers every folder under the library folders; changes are debounced into one rescan (1.5 s).
+- Covers: thumbnails (≤720 px tall, JPEG) in $XDG_CACHE_HOME/dogear/covers/<id>.jpg, made once.
+- Authors given in sort form ("Kleppmann, Martin") show as "Martin Kleppmann"; sort uses file-as, else the derived "Last, First".
+- Series: shown is the user's (`user_series`, NULL = not set, '' = none), else the EPUB's (`series`: Calibre or EPUB 3 collection), else the folder's (`folder_series`: a numbered file — leading number, or "Book 4", "#4", "Vol. 4" — in a subfolder of a library folder holding two EPUBs or more). Kept in separate columns so a rescan never undoes an edit; `e` sets the user's ("Name #3"; several books without a number are numbered in the order shown; empty = none; "auto" clears the override).
+- Stacks (`z`, `[library] stacks`): a series with two books or more in view is one item (`isSeries`, `books`, `next` = the one being read, else the first unfinished); it sorts by its latest reading/adding and its name. Enter opens it (`openSeries`, books by series index); q/Backspace/Esc leave. A text filter shows single books.
+- Tags: table `tags` (book, tag NOCASE, source 'book'|'user', removed). The EPUB's dc:subject (split on , ;) are 'book' tags, refreshed on each scan; removing one sets `removed`, so a rescan keeps it off; user tags are deleted outright. `t` filters by a tag (TagPanel, counts), `T` edits the tags of the selection or current book (for several: the tags they share).
+- Books with no title in their metadata take it from the file name, less site tags like "(z-lib.org)", with "… by Author" split off.
+- Keys (LibraryView.handleKey): h j k l/arrows move (j/k by a row of the grid), gg G, Ctrl+d/u/f/b, Enter/o open (l too in the list), / filter, t tag, s/S sort (recent, title, author+series, added, progress), v grid/list, z stacks, Space select (a stack: all its books), e series, T tags, a add (FileDialog), R rescan, Esc lets go of selection → filter → tag → series, q leaves a series, else quits. In the reader q goes back to the library. `[library] view`, `sort` and `stacks` are remembered.
 
 ## The reader page
 
