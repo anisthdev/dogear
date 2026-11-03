@@ -84,7 +84,7 @@ const bookCSS = s => `
     pre {
         white-space: pre-wrap !important;
     }
-    ${s.dark ? imageCSS[s.images] ?? imageCSS.dim : ''}
+    ${s.dark ? imageCSS[s.images] ?? imageCSS.dim : imageCSS.light}
     ${fontCSS(s.fontFamily)}
     aside[epub|type~="endnote"],
     aside[epub|type~="footnote"],
@@ -121,6 +121,13 @@ const relativeSizes = text => text
 // lets the page's colour through where it's black; it needs the page's
 // background on the section's own <html>, which bookCSS sets.
 const imageCSS = {
+    // Light pages: multiplying by the page makes a picture's white paper
+    // the page's own colour (sepia's, a light palette's) and leaves the
+    // rest nearly as it is; on a white page it changes nothing
+    light: `
+        img, svg image {
+            mix-blend-mode: multiply;
+        }`,
     dim: `
         img, svg image, video {
             filter: brightness(0.8);

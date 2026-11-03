@@ -22,7 +22,9 @@ QtObject {
         })
     readonly property var papers: ({
             light: {
-                bg: "#fbfaf7",
+                // Pure white, as books' pictures are: an off-white page
+                // shows every picture's edge
+                bg: "#ffffff",
                 fg: "#1f1f1f",
                 link: "#2f5fb3",
                 dark: false
