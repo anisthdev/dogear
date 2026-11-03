@@ -102,6 +102,27 @@ bool migrate(QSqlDatabase &db)
             return false;
         q.exec("PRAGMA user_version = 5");
     }
+    if (version < 6) {
+        // A book's details from elsewhere than its EPUB, by source:
+        // 'online' (Open Library, Google Books), 'user' (typed in), 'file'
+        // (guessed from the file's name). Library picks what shows.
+        if (!q.exec(R"(CREATE TABLE book_fields (
+                book TEXT NOT NULL,
+                field TEXT NOT NULL,    -- title authors description publisher published isbn cover
+                source TEXT NOT NULL,
+                value TEXT NOT NULL,
+                PRIMARY KEY (book, field, source)
+            ))"))
+            return false;
+        // The online match: which ('openlibrary:/works/OL…W'), when it was
+        // tried, and how it went (pending isbn picked none skipped error)
+        const char *columns[] = {"online_key TEXT", "online_checked INTEGER", "online_status TEXT"};
+        for (const char *column : columns) {
+            if (!q.exec(QStringLiteral("ALTER TABLE books ADD COLUMN ") + column))
+                return false;
+        }
+        q.exec("PRAGMA user_version = 6");
+    }
     return true;
 }
 
@@ -125,10 +146,10 @@ QString Database::coverPath(const QString &id)
     return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/dogear/covers/" + id + ".jpg";
 }
 
-QString Database::saveCover(const QString &id, const QByteArray &image)
+QString Database::saveCover(const QString &id, const QByteArray &image, bool replace)
 {
     const QString path = coverPath(id);
-    if (QFileInfo::exists(path))
+    if (QFileInfo::exists(path) && !replace)
         return path;
     QImage img = QImage::fromData(image);
     if (img.isNull())

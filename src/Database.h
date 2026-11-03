@@ -11,6 +11,6 @@ namespace Database {
 QSqlDatabase connect(const QString &name);
 // Save an EPUB's cover as a thumbnail named after the book; its path, or
 // "" when there's no usable image
-QString saveCover(const QString &id, const QByteArray &image);
+QString saveCover(const QString &id, const QByteArray &image, bool replace = false);
 QString coverPath(const QString &id);
 } // namespace Database

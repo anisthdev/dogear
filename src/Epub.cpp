@@ -191,8 +191,16 @@ std::optional<EpubInfo> Epub::read(const QString &path)
                 creators.append({id, text, role, fileAs});
             else if (name == u"language" && info.language.isEmpty())
                 info.language = text;
-            else if (name == u"description" && info.description.isEmpty())
-                info.description = text;
+            else if (name == u"description" && info.description.isEmpty()) {
+                // Some publishers put the ISBN here
+                const QString isbn = isbnOf(text, "isbn");
+                if (!isbn.isEmpty()) {
+                    if (info.isbn.isEmpty())
+                        info.isbn = isbn;
+                } else {
+                    info.description = text;
+                }
+            }
             else if (name == u"publisher" && info.publisher.isEmpty())
                 info.publisher = text;
             else if (name == u"date" && info.published.isEmpty())

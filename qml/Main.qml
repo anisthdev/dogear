@@ -47,6 +47,8 @@ Window {
         ["a", "Add books (copied into the library folder)"],
         ["R", "Look for new books"],
         ["Ctrl+f", "Search the text of every book"],
+        ["i", "Details (f there: find it online)"],
+        ["F", "Match books not found online yet, one by one"],
         ["?  F1", "These keys"],
         ["q  Ctrl+w", "Quit"]
     ]
@@ -128,6 +130,10 @@ Window {
             return inputDialog.handleKey(e);
         if (selectionMenu.open)
             return selectionMenu.handleKey(e);
+        if (matchPanel.open)
+            return matchPanel.handleKey(e);
+        if (bookPanel.open)
+            return bookPanel.handleKey(e);
         if (bookSearch.open)
             return bookSearch.handleKey(e);
         if (librarySearch.open)
@@ -160,6 +166,17 @@ Window {
             return true;
         }
         if (mode === "library") {
+            if (t === "i" && library.current) {
+                const c = library.current;
+                bookPanel.show(c.isSeries ? c.next.id : c.id);
+                return true;
+            }
+            if (t === "F") {
+                // Not matched, not set aside, in the order shown
+                const shown = library.allBooks();
+                matchPanel.review(shown.filter(b => !b.onlineKey && b.online !== "skipped" && b.online !== "pending").map(b => b.id));
+                return true;
+            }
             if (library.handleKey(e))
                 return true;
             if (t === "q") {
@@ -572,6 +589,24 @@ Window {
             library.setCurrent(0);
         }
         onKeysBack: keyCatcher.forceActiveFocus()
+    }
+
+    BookPanel {
+        id: bookPanel
+
+        dialog: inputDialog
+        onRead: path => win.openBook(path)
+        onFindOnline: book => matchPanel.show(book)
+        onEditSeries: book => library.editSeries([book])
+        onEditTags: book => library.editTags([book])
+        onToast: message => win.toast(message)
+    }
+
+    MatchPanel {
+        id: matchPanel
+
+        onToast: message => win.toast(message)
+        onKeysBack: win.mode === "reader" ? reader.focusPage() : keyCatcher.forceActiveFocus()
     }
 
     InputDialog {

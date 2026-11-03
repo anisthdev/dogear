@@ -88,15 +88,13 @@ QString Scanner::record(const QString &path, const QString &connection, const QS
     if (id.isEmpty())
         return {};
     auto info = Epub::read(fi.absoluteFilePath());
-    if (info && info->title.isEmpty()) {
-        const auto [title, author] = fromFileName(fi);
-        info->title = title;
-        if (info->authors.isEmpty() && !author.isEmpty()) {
-            info->authors = {author};
-            const int space = author.lastIndexOf(' ');
-            info->authorsSort = space > 0 ? author.mid(space + 1) + ", " + author.left(space) : author;
-        }
-    }
+    // Guesses from the file's name, below what the book or the web says
+    // (only for a book that doesn't say what it is)
+    auto [fileTitle, fileAuthor] = fromFileName(fi);
+    if (info && !info->title.isEmpty())
+        fileTitle.clear();
+    if (info && !info->authors.isEmpty())
+        fileAuthor.clear();
     const QString cover = info ? Database::saveCover(id, info->cover) : QString();
     const auto [folderName, folderIndex] = folderSeries(fi, folders);
 
@@ -111,11 +109,12 @@ QString Scanner::record(const QString &path, const QString &connection, const QS
                  ON CONFLICT (id) DO UPDATE SET
                     path = excluded.path, size = excluded.size, mtime = excluded.mtime,
                     scanned = excluded.scanned, missing = 0,
-                    title = coalesce(excluded.title, title),
-                    authors = coalesce(excluded.authors, authors),
+                    title = excluded.title, authors = excluded.authors,
                     authors_sort = excluded.authors_sort, language = excluded.language,
                     description = excluded.description, publisher = excluded.publisher,
                     published = excluded.published, isbn = excluded.isbn,
+                    online_checked = CASE WHEN online_key IS NULL AND coalesce(isbn, '') <> coalesce(excluded.isbn, '')
+                                          THEN NULL ELSE online_checked END,
                     series = excluded.series, series_index = excluded.series_index,
                     cover = excluded.cover, folder_series = excluded.folder_series,
                     folder_series_index = excluded.folder_series_index)");
@@ -141,6 +140,18 @@ QString Scanner::record(const QString &path, const QString &connection, const QS
     if (!q.exec()) {
         qWarning() << "scan:" << path << q.lastError().text();
         return {};
+    }
+
+    for (const auto &[field, value] : {std::pair{QStringLiteral("title"), fileTitle}, std::pair{QStringLiteral("authors"), fileAuthor}}) {
+        QSqlQuery f(db);
+        f.prepare(value.isEmpty() ? "DELETE FROM book_fields WHERE book = ? AND field = ? AND source = 'file'"
+                                  : "INSERT INTO book_fields (book, field, source, value) VALUES (?, ?, 'file', ?) "
+                                    "ON CONFLICT DO UPDATE SET value = excluded.value");
+        f.addBindValue(id);
+        f.addBindValue(field);
+        if (!value.isEmpty())
+            f.addBindValue(value);
+        f.exec();
     }
 
     // The book's own tags: added if new, dropped if the book no longer has

@@ -17,6 +17,7 @@
 
 #include "Database.h"
 #include "Epub.h"
+#include "Online.h"
 #include "Scanner.h"
 
 QString Library::s_startFile;
@@ -60,7 +61,16 @@ Library::Library(QObject *parent)
     connect(&m_thread, &QThread::finished, m_scanner, &QObject::deleteLater);
     connect(this, &Library::startScan, m_scanner, &Scanner::scan);
     connect(m_scanner, &Scanner::changed, this, &Library::reload);
+    // Details from the web, for books with an ISBN after every scan
+    m_online = new Online(this);
+    m_online->setEnabled(s.value("metadata/online", true).toBool());
+    m_online->setGoogleKey(s.value("metadata/googleKey").toString());
+    connect(m_online, &Online::changed, this, &Library::reload);
+    connect(m_online, &Online::matches, this, &Library::onlineMatches);
+    connect(m_online, &Online::applied, this, &Library::onlineApplied);
+
     connect(m_scanner, &Scanner::finished, this, [this] {
+        m_online->autoMatch();
         reload();
         watch();
         setScanning(false);
@@ -162,26 +172,66 @@ void Library::reload()
                      added_at, opened_at,
                      CASE WHEN user_series IS NOT NULL THEN 'user'
                           WHEN nullif(series, '') IS NOT NULL THEN 'book'
-                          WHEN folder_series IS NOT NULL THEN 'folder' ELSE '' END
+                          WHEN folder_series IS NOT NULL THEN 'folder' ELSE '' END,
+                     online_status, online_key
               FROM books WHERE missing = 0)");
+    // Details from elsewhere: book -> field -> source -> value
+    QHash<QString, QHash<QString, QHash<QString, QString>>> fields;
+    {
+        QSqlQuery f(m_db);
+        f.exec("SELECT book, field, source, value FROM book_fields");
+        while (f.next())
+            fields[f.value(0).toString()][f.value(1).toString()][f.value(2).toString()] = f.value(3).toString();
+    }
     QVariantList books;
     while (q.next()) {
+        const QString id = q.value(0).toString();
         const QString path = q.value(1).toString();
-        const QString cover = q.value(12).toString();
+        const auto &extra = fields[id];
+        // A field's value and where it came from: the first source in
+        // `order` that has it ("book" is the EPUB's own column value)
+        auto pick = [&](const QString &field, const QString &own, const QStringList &order) -> std::pair<QString, QString> {
+            for (const QString &source : order) {
+                const QString v = source == "book" ? own : extra.value(field).value(source);
+                if (!v.trimmed().isEmpty())
+                    return {v, source};
+            }
+            return {};
+        };
+        // The book's own name and authors come before the web's (the web's
+        // may be another edition's); the web's description and publishing
+        // details come before the book's (often missing or thin)
+        const QStringList named{"user", "book", "online", "file"};
+        const QStringList described{"user", "online", "book"};
+        const auto [title, titleFrom] = pick("title", q.value(2).toString(), named);
+        const auto [authors, authorsFrom] = pick("authors", q.value(3).toString(), named);
+        const auto [cover, coverFrom] = pick("cover", q.value(12).toString(), {"user", "book", "online"});
+        QString authorsSort = authorsFrom == "book" ? q.value(4).toString() : QString();
+        if (authorsSort.isEmpty()) {
+            const QString first = authors.section(',', 0, 0).trimmed();
+            const int space = first.lastIndexOf(' ');
+            authorsSort = space > 0 ? first.mid(space + 1) + ", " + first.left(space) : first;
+        }
         books.append(QVariantMap{
             {"id", q.value(0)},
             {"path", path},
             // Untitled books go by their file's name
-            {"title", q.value(2).toString().isEmpty() ? QFileInfo(path).completeBaseName() : q.value(2).toString()},
-            {"authors", q.value(3).toString()},
-            {"authorsSort", q.value(4).toString().isEmpty() ? q.value(3).toString() : q.value(4).toString()},
+            {"title", title.isEmpty() ? QFileInfo(path).completeBaseName() : title},
+            {"titleFrom", titleFrom},
+            {"authors", authors},
+            {"authorsFrom", authorsFrom},
+            {"authorsSort", authorsSort},
+            {"online", q.value(17).toString()},
+            {"onlineKey", q.value(18).toString()},
+            {"coverFrom", coverFrom},
             {"series", q.value(5).toString()},
             {"seriesIndex", q.value(6).toDouble()},
             {"language", q.value(7).toString()},
-            {"description", q.value(8).toString()},
-            {"publisher", q.value(9).toString()},
-            {"published", q.value(10).toString()},
-            {"isbn", q.value(11).toString()},
+            {"description", pick("description", q.value(8).toString(), described).first},
+            {"descriptionFrom", pick("description", q.value(8).toString(), described).second},
+            {"publisher", pick("publisher", q.value(9).toString(), described).first},
+            {"published", pick("published", q.value(10).toString(), described).first},
+            {"isbn", pick("isbn", q.value(11).toString(), {"user", "book", "online"}).first},
             {"cover", cover.isEmpty() ? QString() : QUrl::fromLocalFile(cover).toString()},
             {"fraction", q.value(13).toDouble()},
             {"addedAt", q.value(14).toLongLong()},
@@ -259,6 +309,47 @@ void Library::saveProgress(const QString &id, const QString &position, double fr
     }
 }
 
+void Library::setField(const QString &id, const QString &field, const QString &value)
+{
+    static const QStringList known{"title", "authors", "description", "publisher", "published", "isbn"};
+    if (!known.contains(field))
+        return;
+    QSqlQuery q(m_db);
+    if (value.trimmed().isEmpty()) {
+        q.prepare("DELETE FROM book_fields WHERE book = ? AND field = ? AND source = 'user'");
+        q.addBindValue(id);
+        q.addBindValue(field);
+    } else {
+        q.prepare("INSERT INTO book_fields (book, field, source, value) VALUES (?, ?, 'user', ?) "
+                  "ON CONFLICT DO UPDATE SET value = excluded.value");
+        q.addBindValue(id);
+        q.addBindValue(field);
+        q.addBindValue(value.trimmed());
+    }
+    q.exec();
+    reload();
+}
+
+void Library::findOnline(const QString &request, const QString &query)
+{
+    m_online->search(request, query);
+}
+
+void Library::applyOnline(const QString &id, const QVariantMap &candidate)
+{
+    m_online->apply(id, candidate, true);
+}
+
+void Library::clearOnline(const QString &id)
+{
+    m_online->clear(id);
+}
+
+void Library::skipOnline(const QString &id)
+{
+    m_online->skip(id);
+}
+
 void Library::saveDetails(const QString &id, const QString &title, const QString &authors)
 {
     QSqlQuery q(m_db);
@@ -314,7 +405,7 @@ void Library::setTags(const QString &id, const QStringList &wanted)
         if (tags.contains(it.key(), Qt::CaseInsensitive))
             continue;
         QSqlQuery u(m_db);
-        u.prepare(it.value() == "book" ? "UPDATE tags SET removed = 1 WHERE book = ? AND tag = ?"
+        u.prepare(it.value() != "user" ? "UPDATE tags SET removed = 1 WHERE book = ? AND tag = ?"
                                        : "DELETE FROM tags WHERE book = ? AND tag = ?");
         u.addBindValue(id);
         u.addBindValue(it.key());

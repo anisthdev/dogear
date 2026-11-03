@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBZIP REQUIRED IMPORTED_TARGET libzip)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick Sql WebEngineQuick WebChannel)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick Sql WebEngineQuick WebChannel)
 qt_standard_project_setup(REQUIRES 6.5)
 
 qt_add_executable(dogear src/main.cpp)
@@ -23,6 +23,7 @@ qt_add_qml_module(dogear
         src/Database.h src/Database.cpp
         src/Epub.h src/Epub.cpp
         src/Scanner.h src/Scanner.cpp
+        src/Online.h src/Online.cpp
         src/TextFile.h src/TextFile.cpp
         src/SchemeHandler.h src/SchemeHandler.cpp
         src/WindowWatch.h src/WindowWatch.cpp
@@ -38,6 +39,8 @@ qt_add_qml_module(dogear
         qml/views/SelectionMenu.qml
         qml/views/AnnotationsPanel.qml
         qml/views/SearchPanel.qml
+        qml/views/BookPanel.qml
+        qml/views/MatchPanel.qml
         qml/components/InputDialog.qml
         qml/components/TextButton.qml
         qml/views/LibraryView.qml
@@ -58,7 +61,7 @@ target_include_directories(dogear PRIVATE src)
 target_compile_definitions(dogear PRIVATE DOGEAR_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(dogear PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Sql Qt6::WebEngineQuick Qt6::WebChannel PkgConfig::LIBZIP)
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::Sql Qt6::WebEngineQuick Qt6::WebChannel PkgConfig::LIBZIP)
 
 include(GNUInstallDirs)
 install(TARGETS dogear RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

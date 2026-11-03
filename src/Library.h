@@ -9,6 +9,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+class Online;
 class Scanner;
 
 // The books Dogear knows, in SQLite ($XDG_DATA_HOME/dogear/library.db),
@@ -62,6 +63,16 @@ public:
     // Copy files (paths or file:// URLs) into the first folder; how many
     Q_INVOKABLE int add(const QVariantList &files);
     Q_INVOKABLE void rescan();
+
+    // A field typed in by hand (title, authors, description, publisher,
+    // published, isbn); "" goes back to what the book or the web says
+    Q_INVOKABLE void setField(const QString &id, const QString &field, const QString &value);
+    // Online details (see Online): candidates for a query come as
+    // onlineMatches(request, …); applying one as onlineApplied
+    Q_INVOKABLE void findOnline(const QString &request, const QString &query);
+    Q_INVOKABLE void applyOnline(const QString &id, const QVariantMap &candidate);
+    Q_INVOKABLE void clearOnline(const QString &id);
+    Q_INVOKABLE void skipOnline(const QString &id);
     // Set the series of books by hand: `name` "" means none; `indexes`
     // match `ids` (0 for no number). resetSeries goes back to the book's
     // own or the folder's.
@@ -92,6 +103,8 @@ signals:
     void booksChanged();
     void scanningChanged();
     void startScan(const QStringList &folders);
+    void onlineMatches(const QString &request, const QVariantList &candidates, const QString &error);
+    void onlineApplied(const QString &id, bool ok, const QString &error);
 
 private:
     void reload();
@@ -105,6 +118,7 @@ private:
     bool m_rescanQueued = false;
     QThread m_thread;
     Scanner *m_scanner = nullptr;
+    Online *m_online = nullptr;
     QFileSystemWatcher m_watcher;
     QTimer m_rescanTimer;
     static QString s_startFile;

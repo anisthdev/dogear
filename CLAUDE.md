@@ -8,7 +8,7 @@ An ebook reader and library, like Foliate but ours. App ID `io.github.anisthdev.
 2. **Library** (done): folders indexed in place and watched; adding copies into the first folder. Cover grid and list, sort, `/` filter; it opens on the book read last.
 3. **Annotations** (done): highlights, notes, bookmarks, visual mode, one panel, Markdown to the clipboard.
 4. **Search** (done): in the book (`/`, panel + n/N), across every book's text (Ctrl+f, FTS5).
-5. **Metadata online**: Open Library, then Google Books, EPUB's own as fallback. ISBN matches apply by themselves; title searches show a picker. Hand edits are never overwritten.
+5. **Metadata online** (done): Open Library (Google Books with a key); ISBN matches by themselves, the rest by `F`/`f` with a picker; hand edits win.
 6. **Dictionary** (sdcv/StarDict, Wiktionary fallback) and **TTS** (speech-dispatcher, Piper if installed; foliate-js `tts.js` gives SSML).
 7. **OPDS** catalogues (foliate-js `opds.js`).
 8. **PDF** later, through pdf.js (left out of `reader/foliate/vendor` until then).
@@ -30,6 +30,7 @@ src/main.cpp           WebEngine set-up (must come before the app), command line
 src/Library.*          QML singleton: the books QML sees, folders, watching, opening, progress, adding
 src/Database.*         the SQLite file ($XDG_DATA_HOME/dogear/library.db), its schema (user_version), cover thumbnails
 src/Scanner.*          library scan on its own thread; record() hashes, reads and upserts one file
+src/Online.*           Open Library / Google Books: ISBN lookups, searches, applying a match (book_fields 'online', tags, cover)
 src/Epub.*             what an EPUB says (OPF metadata, series, cover) and its sections' text with chapter labels (nav/NCX), read from the zip with libzip
 src/SchemeHandler.*    dogear://app/...: reader page from :/reader, qwebchannel.js, books as /book/<id>
 src/TextFile.*         watched text file (Quickshell's FileView isn't available here): colors.css, fonts.conf
@@ -38,7 +39,7 @@ qml/Main.qml           the window, overlays, every key binding (handleKey)
 qml/Theme.qml          singleton: app palette (matugen or Material baseline), fonts, motion
 qml/ReadingTheme.qml   singleton: page colours and type, settings in $XDG_CONFIG_HOME/dogear/dogear.conf
 qml/KeyEvents.qml      singleton: the page's key events as Qt-style ones
-qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel, SearchPanel (both searches)
+qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel, SearchPanel (both searches), BookPanel (i: details), MatchPanel (f/F: online match)
 qml/components/        Cover (rounded, placeholder card); Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
 reader/index.html, reader.js   the page: foliate-js driven over the web channel
 reader/foliate/        foliate-js, vendored (commit in VERSION, MIT); don't edit, update whole
@@ -76,6 +77,16 @@ Every QML file imports `Dogear` (its own module) rather than relative paths. Sin
 - Every book (Ctrl+f, anywhere): FTS5 table `book_text` (schema v5; book, section = spine index, chapter, text; unicode61 remove_diacritics 2), filled by `Scanner::record` from `Epub::sections`. `Library.searchText` makes the words one phrase (`"a b c" *`, no `*` for whole words), `snippet()` marks the match with \x01/\x02, best 200 by rank; the panel groups by book (best first), passages in reading order. Opening one runs the book search with `jumpSection` and `near` (the passage's text before the match) and goes to that match.
 - SearchPanel: typing searches after 250 ms; Enter/Down to the results (cursor on the first match of each new search, set after the list has the rows); j/k skip headings, Enter/l opens, / back to the field, q/Esc close.
 - `sqlite3` on this machine's PATH is the Android SDK's, without FTS5: use /usr/bin/sqlite3 or Python to look at `book_text`.
+
+## Book details and online metadata
+
+- Sources, kept apart (schema v6): the EPUB's own columns on `books` ('book'); `book_fields` (book, field, source, value) for 'user' (typed in, `i` then t a p y I), 'online' and 'file' (the file name, only for books that don't say). `Library.reload` picks per field: title/authors user → book → online → file; description/publisher/published user → online → book; cover user → book → online; each book carries `…From` for the sheet. Nothing overwrites another source; `setField(id, f, "")` drops the user's.
+- `Online` (one request at a time, 350 ms apart, User-Agent naming Dogear): after each scan, books with an ISBN not yet tried get `/isbn/{isbn}.json` (an edition: its publisher, date, ISBN) + its author + its work (description, subjects); books without one are marked 'none' for the review. `online_status`: pending isbn picked none skipped error; a new ISBN from a rescan of an unmatched book clears `online_checked`, so it's tried again.
+- By hand: `f` in the details, or `F` in the library for every unmatched, unskipped book in turn (Esc next, x never ask, q stop). `/search.json?q=` (every word must match: the field starts as title less any subtitle + first author's surname, and a search finding nothing retries with the last word dropped, up to 3 times). A search gives a *work*: its publishers and ISBNs are every edition's, so only work-level fields are kept (title, authors, description, first year, cover, tags).
+- Google Books only with `[metadata] googleKey` (its keyless quota is shared and spent); `[metadata] online=false` turns lookups off.
+- Tags from the web (source 'online', replaced with each match, removable like the book's): genres named in the subjects (a fixed list in `Online::cleanSubjects`; in a list over 20 a genre must be named twice), else up to five short English topics. A tag the book already has stays the book's.
+- Covers from the web are kept as `<id>-online.jpg`; the EPUB's comes first.
+- QML's JavaScript here has no `Array.prototype.flatMap`: use loops (`LibraryView.allBooks`).
 
 ## The reader page
 

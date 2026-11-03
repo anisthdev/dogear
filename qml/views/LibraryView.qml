@@ -145,6 +145,19 @@ Item {
         view.positionViewAtIndex(i, ListView.Contain);
     }
 
+    // Every book shown, a stack's in its order (QML's JS has no flatMap)
+    function allBooks() {
+        const out = [];
+        for (const it of items) {
+            if (it.isSeries)
+                for (const b of it.books)
+                    out.push(b);
+            else
+                out.push(it);
+        }
+        return out;
+    }
+
     function setCurrent(i) {
         if (items.length === 0)
             return;
@@ -220,8 +233,8 @@ Item {
         return it.isSeries ? it.books.every(b => selected[b.id]) : !!selected[it.id];
     }
 
-    function editSeries() {
-        const books = targets();
+    function editSeries(given) {
+        const books = given ?? targets();
         if (books.length === 0)
             return;
         const names = [...new Set(books.map(b => b.series))];
@@ -244,7 +257,7 @@ Item {
             else if (books.length === 1)
                 indexes = [books[0].series === name ? books[0].seriesIndex : 0];
             else {
-                const order = items.flatMap(it => it.isSeries ? it.books : [it]).map(b => b.id);
+                const order = root.allBooks().map(b => b.id);
                 const sorted = books.slice().sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
                 indexes = books.map(b => sorted.indexOf(b) + 1);
             }
@@ -254,8 +267,8 @@ Item {
         });
     }
 
-    function editTags() {
-        const books = targets();
+    function editTags(given) {
+        const books = given ?? targets();
         if (books.length === 0)
             return;
         // Tags every one of them has; editing changes those, leaving the
