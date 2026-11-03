@@ -23,6 +23,20 @@ Item {
     readonly property string title: details?.title ?? ""
     readonly property var toc: details?.toc ?? []
 
+    // This book's highlights and bookmarks (Library.annotations)
+    property var annotations: []
+    // What the page has selected, for the menu: { cfi, text, rect (page
+    // coordinates), annotation (id of a highlight clicked, or null),
+    // color, style }; null when nothing is
+    property var selection: null
+    // Visual mode is on (the page has its keys)
+    property bool visual: false
+    // Where the page sits in this item, for placing the menu
+    readonly property real pageY: web.y
+
+    // A selection was made or a highlight clicked
+    signal selected
+
     property bool pageReady: false
     // What Library.open gave for the open book; sent to the page whenever
     // it (re)starts
@@ -36,12 +50,106 @@ Item {
         }
         root.book = book;
         bookId = book.id;
+        annotations = Library.annotations(book.id);
+        selection = null;
+        visual = false;
         details = null;
         where = {
             fraction: book.fraction
         };
         if (pageReady)
-            send("open", book);
+            send("open", Object.assign({}, book, {
+                annotations: annotations
+            }));
+        return true;
+    }
+
+    // Highlight the selection (or restyle the highlight it is); the
+    // annotation saved
+    function highlight(color, style) {
+        const s = selection;
+        if (!s)
+            return null;
+        if (s.annotation) {
+            Library.updateAnnotation(s.annotation, {
+                color: color,
+                style: style
+            });
+            const a = Object.assign({}, annotations.find(x => x.id === s.annotation), {
+                color: color,
+                style: style
+            });
+            annotations = annotations.map(x => x.id === a.id ? a : x);
+            send("updateAnnotation", a);
+            selection = null;
+            return a;
+        }
+        // Highlights this one grew over: replaced by it, their notes kept
+        const merged = annotations.filter(x => (s.merges ?? []).includes(x.id));
+        for (const old of merged)
+            removeAnnotation(old.id);
+        const saved = Library.addAnnotation(bookId, {
+            kind: "highlight",
+            cfi: s.cfi,
+            color: color,
+            style: style,
+            text: s.text,
+            note: merged.map(x => x.note).filter(Boolean).join("\n\n"),
+            chapter: where?.tocLabel ?? "",
+            fraction: where?.fraction ?? 0
+        });
+        if (!saved.id)
+            return null;
+        annotations = annotations.concat([saved]).sort((a, b) => a.fraction - b.fraction);
+        send("addAnnotation", saved);
+        selection = null;
+        return saved;
+    }
+
+    function setNote(id, note) {
+        Library.updateAnnotation(id, {
+            note: note
+        });
+        annotations = annotations.map(x => x.id === id ? Object.assign({}, x, {
+                note: note
+            }) : x);
+    }
+
+    function removeAnnotation(id) {
+        const a = annotations.find(x => x.id === id);
+        if (!a)
+            return;
+        Library.removeAnnotation(id);
+        annotations = annotations.filter(x => x.id !== id);
+        send("removeAnnotation", a);
+        selection = null;
+    }
+
+    function clearSelection() {
+        selection = null;
+        send("clearSelection");
+    }
+
+    // m: bookmark this page, or take its bookmark off. True when added.
+    function toggleBookmark() {
+        if (!where?.pageCfi)
+            return false;
+        if (where.bookmark) {
+            removeAnnotation(where.bookmark);
+            return false;
+        }
+        const saved = Library.addAnnotation(bookId, {
+            kind: "bookmark",
+            cfi: where.pageCfi,
+            text: where.excerpt ?? "",
+            note: "",
+            chapter: where.tocLabel ?? "",
+            fraction: where.fraction ?? 0
+        });
+        if (!saved.id)
+            return false;
+        annotations = annotations.concat([saved]).sort((a, b) => a.fraction - b.fraction);
+        send("addAnnotation", saved);
         return true;
     }
 
@@ -67,7 +175,8 @@ Item {
             root.send("style", ReadingTheme.style);
             if (root.book)
                 root.send("open", Object.assign({}, root.book, {
-                    position: root.where?.cfi ?? root.book.position
+                    position: root.where?.cfi ?? root.book.position,
+                    annotations: root.annotations
                 }));
         }
 
@@ -86,6 +195,22 @@ Item {
 
         function key(json) {
             root.keyPressed(KeyEvents.fromWeb(JSON.parse(json)));
+        }
+
+        function selection(json) {
+            root.selection = JSON.parse(json);
+            root.selected();
+        }
+
+        function visual(json) {
+            root.visual = JSON.parse(json).active;
+        }
+
+        function bookmark(json) {
+            if (root.where)
+                root.where = Object.assign({}, root.where, {
+                    bookmark: JSON.parse(json).id
+                });
         }
 
         function error(json) {
@@ -145,6 +270,27 @@ Item {
                 NumberAnimation {
                     duration: Theme.animNormal
                 }
+            }
+        }
+    }
+
+    // A ribbon hanging over the page's top corner while it's bookmarked
+    Rectangle {
+        z: 2
+        anchors.left: parent.left
+        anchors.leftMargin: 40
+        y: root.where?.bookmark ? 0 : -height
+        width: 16
+        height: 30
+        radius: 3
+        color: ReadingTheme.isAuto ? Theme.primary : ReadingTheme.link
+        visible: y > -height
+
+        Behavior on y {
+            NumberAnimation {
+                duration: Theme.animNormal
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Theme.emphasizedDecel
             }
         }
     }

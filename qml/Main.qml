@@ -61,6 +61,9 @@ Window {
         ["c  C", "Next, previous colours"],
         ["+  -  0", "Larger, smaller, normal text"],
         ["F", "Font (/ filters)"],
+        ["v", "Visual mode: select with h l w b e j k ( ) { } 0 $, y to finish"],
+        ["m", "Bookmark this page (again: take it off)"],
+        ["a", "Highlights and bookmarks"],
         ["s", "Pages or scrolling"],
         ["i", "Dim or invert pictures (dark pages)"],
         ["o", "Open a book"],
@@ -102,6 +105,14 @@ Window {
         keyCatcher.forceActiveFocus();
     }
 
+    function editNote(a) {
+        const what = a.kind === "bookmark" ? "this bookmark" : `“${a.text.length > 80 ? a.text.slice(0, 80) + "…" : a.text}”`;
+        inputDialog.ask("Note", `On ${what}. Empty takes it off.`, a.note ?? "", "Save", note => {
+            reader.setNote(a.id, note.trim());
+            toast(note.trim() ? "Note saved" : "Note taken off");
+        });
+    }
+
     function addFiles(urls) {
         const n = Library.add(urls);
         toast(n === 0 ? "No books added" : n === 1 ? "Added a book" : `Added ${n} books`);
@@ -110,6 +121,10 @@ Window {
     function handleKey(e) {
         if (inputDialog.open)
             return inputDialog.handleKey(e);
+        if (selectionMenu.open)
+            return selectionMenu.handleKey(e);
+        if (annotationsPanel.open)
+            return annotationsPanel.handleKey(e);
         if (help.open)
             return help.handleKey(e);
         if (tagPanel.open)
@@ -237,6 +252,15 @@ Window {
             if (reader.hasBook)
                 fonts.show();
             return true;
+        case "v":
+            reader.send("visual");
+            return true;
+        case "m":
+            toast(reader.toggleBookmark() ? "Bookmarked" : "Bookmark taken off");
+            return true;
+        case "a":
+            annotationsPanel.show();
+            return true;
         case "o":
             fileDialog.open();
             return true;
@@ -301,6 +325,7 @@ Window {
         anchors.fill: parent
         visible: win.mode === "reader" && hasBook
         onKeyPressed: event => win.handleKey(event)
+        onSelected: selectionMenu.show()
         onFailed: message => win.toast(message)
     }
 
@@ -317,6 +342,54 @@ Window {
         tagPanel: tagPanel
     }
 
+    SelectionMenu {
+        id: selectionMenu
+
+        reader: reader
+        onToast: message => win.toast(message)
+        onEditNote: annotation => win.editNote(annotation)
+        onOpenChanged: if (!open && win.mode === "reader")
+            reader.focusPage()
+    }
+
+    AnnotationsPanel {
+        id: annotationsPanel
+
+        reader: reader
+        onToast: message => win.toast(message)
+        onEditNote: annotation => win.editNote(annotation)
+        onChosen: cfi => reader.send("goTo", cfi)
+        onOpenChanged: if (!open && win.mode === "reader")
+            reader.focusPage()
+    }
+
+    // Visual mode's reminder, while it's on
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: parent.height - height - 60
+        width: visualLabel.implicitWidth + 32
+        height: 36
+        radius: 18
+        color: Theme.primary_container
+        opacity: reader.visual && win.mode === "reader" ? 1 : 0
+        visible: opacity > 0
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: Theme.animFast
+            }
+        }
+
+        Label {
+            id: visualLabel
+
+            anchors.centerIn: parent
+            text: "Visual · h l w b e j k ( ) { } 0 $ to select · o other end · y done · Esc cancel"
+            color: Theme.on_primary_container
+            font.pixelSize: 12
+        }
+    }
+
     TagPanel {
         id: tagPanel
 
@@ -330,7 +403,7 @@ Window {
     InputDialog {
         id: inputDialog
 
-        onClosed: keyCatcher.forceActiveFocus()
+        onClosed: win.mode === "reader" ? reader.focusPage() : keyCatcher.forceActiveFocus()
     }
 
     DropArea {

@@ -73,6 +73,9 @@ QtObject {
         // "" keeps the book's own fonts; else a family name, or "serif" /
         // "sans-serif" for the system's defaults
         property string fontFamily: ""
+        // What a new highlight looks like: the colour and style used last
+        property string highlightColor: "yellow"
+        property string highlightStyle: "highlight"
     }
 
     // A font being tried in the font list: shown on the page, not saved

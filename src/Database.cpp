@@ -70,6 +70,28 @@ bool migrate(QSqlDatabase &db)
             return false;
         q.exec("PRAGMA user_version = 3");
     }
+    if (version < 4) {
+        // Highlights (a CFI range) and bookmarks (the CFI of a page's
+        // start), together. `chapter` and `fraction` are where they were
+        // made, for lists and export without opening the book.
+        if (!q.exec(R"(CREATE TABLE annotations (
+                id INTEGER PRIMARY KEY,
+                book TEXT NOT NULL,
+                kind TEXT NOT NULL,           -- 'highlight' | 'bookmark'
+                cfi TEXT NOT NULL,
+                color TEXT,                   -- yellow, green, blue, pink, purple
+                style TEXT,                   -- 'highlight' | 'underline'
+                text TEXT,
+                note TEXT,
+                chapter TEXT,
+                fraction REAL,
+                created INTEGER NOT NULL,
+                updated INTEGER NOT NULL
+            ))"))
+            return false;
+        q.exec("CREATE INDEX annotations_book ON annotations (book)");
+        q.exec("PRAGMA user_version = 4");
+    }
     return true;
 }
 

@@ -6,7 +6,7 @@ An ebook reader and library, like Foliate but ours. App ID `io.github.anisthdev.
 
 1. **Reader core** (done): open an EPUB, pages or scrolling, colour schemes, contents, position saved and restored, keys.
 2. **Library** (done): folders indexed in place and watched; adding copies into the first folder. Cover grid and list, sort, `/` filter; it opens on the book read last.
-3. **Annotations**: highlights, notes, bookmarks (foliate-js `Overlayer`, CFI ranges in SQLite), panel, Markdown export.
+3. **Annotations** (done): highlights, notes, bookmarks, visual mode, one panel, Markdown to the clipboard.
 4. **Search**: in the book (foliate-js `search.js`), across the library (SQLite FTS5).
 5. **Metadata online**: Open Library, then Google Books, EPUB's own as fallback. ISBN matches apply by themselves; title searches show a picker. Hand edits are never overwritten.
 6. **Dictionary** (sdcv/StarDict, Wiktionary fallback) and **TTS** (speech-dispatcher, Piper if installed; foliate-js `tts.js` gives SSML).
@@ -38,7 +38,7 @@ qml/Main.qml           the window, overlays, every key binding (handleKey)
 qml/Theme.qml          singleton: app palette (matugen or Material baseline), fonts, motion
 qml/ReadingTheme.qml   singleton: page colours and type, settings in $XDG_CONFIG_HOME/dogear/dogear.conf
 qml/KeyEvents.qml      singleton: the page's key events as Qt-style ones
-qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel
+qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel
 qml/components/        Cover (rounded, placeholder card); Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
 reader/index.html, reader.js   the page: foliate-js driven over the web channel
 reader/foliate/        foliate-js, vendored (commit in VERSION, MIT); don't edit, update whole
@@ -59,6 +59,16 @@ Every QML file imports `Dogear` (its own module) rather than relative paths. Sin
 - Tags: table `tags` (book, tag NOCASE, source 'book'|'user', removed). The EPUB's dc:subject (split on , ;) are 'book' tags, refreshed on each scan; removing one sets `removed`, so a rescan keeps it off; user tags are deleted outright. `t` filters by a tag (TagPanel, counts), `T` edits the tags of the selection or current book (for several: the tags they share).
 - Books with no title in their metadata take it from the file name, less site tags like "(z-lib.org)", with "… by Author" split off.
 - Keys (LibraryView.handleKey): h j k l/arrows move (j/k by a row of the grid), gg G, Ctrl+d/u/f/b, Enter/o open (l too in the list), / filter, t tag, s/S sort (recent, title, author+series, added, progress), v grid/list, z stacks, Space select (a stack: all its books), e series, T tags, a add (FileDialog), R rescan, Esc lets go of selection → filter → tag → series, q leaves a series, else quits. In the reader q goes back to the library. `[library] view`, `sort` and `stacks` are remembered.
+
+## Annotations
+
+- Table `annotations` (schema v4): kind 'highlight' (a CFI range) or 'bookmark' (the CFI of the page's start, `CFI.collapse` of the relocate CFI), color (yellow green blue pink purple), style ('highlight' | 'underline'), text, note, chapter and fraction (for lists and export without the book open). Library.annotations/addAnnotation/updateAnnotation/removeAnnotation; Reader keeps the book's list and tells the page what to draw.
+- Page side (reader.js `Notes`): annotations by CFI and by section index; foliate's `create-overlay` asks for a section's highlights as it's laid out, `draw-annotation` for each one's look (`Overlayer.highlight`/`underline`), `show-annotation` reports a click on one (which then doesn't turn the page). Every `open` must carry `annotations`, or nothing is drawn.
+- Selections reach QML as `selection` { cfi, text, rect in page coordinates, annotation id when a highlight was clicked } and open `SelectionMenu` beside them: 1–5 colour, u highlight/underline, n note (highlights first), c/y copy, d/Delete delete, Enter the last colour, Esc/q let go. The last colour and style are `[reading] highlightColor/highlightStyle`.
+- Overlaps (reader.js `announce`): a selection inside one highlight is that highlight (its menu, as a click); one overlapping highlights reaches over all of them and carries their ids as `merges`, which Reader deletes when saving it (notes joined). So two highlights never share a CFI: the page keys drawings by CFI, and a duplicate left a row with nothing drawn.
+- Visual mode (`v`, reader.js `Visual`): starts on the page's first word (skipping empty text nodes), grows with `Selection.modify` (h l w e b j k ( ) { } 0 ^ $, o swaps ends), turns the page or scrolls to keep the moving end in view; y/Enter hand it to the menu, Esc/v/q drop it. While on, the page keeps its keys.
+- `m` bookmarks the page or takes its bookmark off; a ribbon hangs at the page's top left while it has one (`relocated.bookmark`: a bookmark's CFI inside the page's range).
+- `a` opens AnnotationsPanel: reading order, Enter goes there, n note, y copy, dd delete, Y copies everything as Markdown (chapter headings, highlights as quotes with notes below, bookmarks as items).
 
 ## The reader page
 

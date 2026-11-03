@@ -71,6 +71,16 @@ public:
     // left out are marked removed, so a rescan doesn't bring them back
     Q_INVOKABLE void setTags(const QString &id, const QStringList &tags);
 
+    // A book's highlights and bookmarks, in reading order: { id, kind,
+    // cfi, color, style, text, note, chapter, fraction, created, updated }
+    Q_INVOKABLE QVariantList annotations(const QString &book) const;
+    // Save a new one (fields as above, less id); it back with its id
+    Q_INVOKABLE QVariantMap addAnnotation(const QString &book, const QVariantMap &annotation);
+    // Change color, style or note
+    Q_INVOKABLE void updateAnnotation(int id, const QVariantMap &changes);
+    Q_INVOKABLE void removeAnnotation(int id);
+    Q_INVOKABLE void copy(const QString &text) const;
+
 signals:
     void foldersChanged();
     void booksChanged();

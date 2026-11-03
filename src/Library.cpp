@@ -5,6 +5,8 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QHash>
 #include <QRegularExpression>
 #include <QSettings>
@@ -332,6 +334,91 @@ void Library::setTags(const QString &id, const QStringList &wanted)
         u.exec();
     }
     reload();
+}
+
+static QVariantMap annotationAt(const QSqlQuery &q)
+{
+    return {
+        {"id", q.value(0).toInt()},
+        {"kind", q.value(1).toString()},
+        {"cfi", q.value(2).toString()},
+        {"color", q.value(3).toString()},
+        {"style", q.value(4).toString()},
+        {"text", q.value(5).toString()},
+        {"note", q.value(6).toString()},
+        {"chapter", q.value(7).toString()},
+        {"fraction", q.value(8).toDouble()},
+        {"created", q.value(9).toLongLong()},
+        {"updated", q.value(10).toLongLong()},
+    };
+}
+
+QVariantList Library::annotations(const QString &book) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(R"(SELECT id, kind, cfi, color, style, text, note, chapter, fraction, created, updated
+                 FROM annotations WHERE book = ? ORDER BY fraction, created)");
+    q.addBindValue(book);
+    q.exec();
+    QVariantList list;
+    while (q.next())
+        list.append(annotationAt(q));
+    return list;
+}
+
+QVariantMap Library::addAnnotation(const QString &book, const QVariantMap &a)
+{
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    QSqlQuery q(m_db);
+    q.prepare(R"(INSERT INTO annotations (book, kind, cfi, color, style, text, note, chapter, fraction, created, updated)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?))");
+    q.addBindValue(book);
+    q.addBindValue(a.value("kind", "highlight"));
+    q.addBindValue(a.value("cfi"));
+    q.addBindValue(a.value("color"));
+    q.addBindValue(a.value("style"));
+    q.addBindValue(a.value("text"));
+    q.addBindValue(a.value("note"));
+    q.addBindValue(a.value("chapter"));
+    q.addBindValue(a.value("fraction", 0.0));
+    q.addBindValue(now);
+    q.addBindValue(now);
+    if (!q.exec()) {
+        qWarning() << "annotations:" << q.lastError().text();
+        return {};
+    }
+    QVariantMap saved = a;
+    saved["id"] = q.lastInsertId().toInt();
+    saved["created"] = now;
+    saved["updated"] = now;
+    return saved;
+}
+
+void Library::updateAnnotation(int id, const QVariantMap &changes)
+{
+    for (const char *field : {"color", "style", "note"}) {
+        if (!changes.contains(field))
+            continue;
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("UPDATE annotations SET %1 = ?, updated = ? WHERE id = ?").arg(field));
+        q.addBindValue(changes.value(field));
+        q.addBindValue(QDateTime::currentSecsSinceEpoch());
+        q.addBindValue(id);
+        q.exec();
+    }
+}
+
+void Library::removeAnnotation(int id)
+{
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM annotations WHERE id = ?");
+    q.addBindValue(id);
+    q.exec();
+}
+
+void Library::copy(const QString &text) const
+{
+    QGuiApplication::clipboard()->setText(text);
 }
 
 int Library::add(const QVariantList &files)

@@ -7,6 +7,8 @@
 // key pressed here, which QML handles), error.
 
 import './foliate/view.js'
+import { Overlayer } from './foliate/overlayer.js'
+import * as CFI from './foliate/epubcfi.js'
 
 // foliate's paginator keeps its scrolling container in a closed shadow
 // root; open ones let us hide its scrollbar and scroll it ourselves
@@ -231,6 +233,303 @@ function applyStyle() {
     if (style.flow !== 'scrolled') Scroller.stop()
 }
 
+// Highlights and bookmarks. QML keeps them (Library) and tells the page
+// what to draw: addAnnotation, updateAnnotation, removeAnnotation, each
+// with the saved annotation { id, kind, cfi, color, style, … }. The page
+// reports selections (`selection`, with where on screen) for QML's menu,
+// and with every move whether the page holds a bookmark.
+const colors = {
+    yellow: '#f2c94c',
+    green: '#6fcf97',
+    blue: '#56a8f0',
+    pink: '#f28cb5',
+    purple: '#b18cf0',
+}
+const Notes = {
+    byCfi: new Map(),
+    byIndex: new Map(),
+    // A click on a highlight, so the same click doesn't turn the page
+    clickedAt: 0,
+    // The selection QML's menu is about: { doc, range }
+    current: null,
+    reset(list) {
+        this.byCfi.clear()
+        this.byIndex.clear()
+        this.current = null
+        for (const a of list ?? []) this.put(a)
+    },
+    indexOf(a) {
+        try {
+            return view.resolveCFI(a.cfi).index
+        } catch {
+            return -1
+        }
+    },
+    put(a) {
+        this.byCfi.set(a.cfi, a)
+        const index = this.indexOf(a)
+        this.byIndex.set(index, (this.byIndex.get(index) ?? []).filter(x => x.id !== a.id).concat([a]))
+    },
+    drop(a) {
+        this.byCfi.delete(a.cfi)
+        const index = this.indexOf(a)
+        this.byIndex.set(index, (this.byIndex.get(index) ?? []).filter(x => x.id !== a.id))
+    },
+    draw(a) {
+        if (a.kind === 'highlight') view.addAnnotation({ value: a.cfi })
+    },
+    add(a) {
+        this.put(a)
+        this.draw(a)
+        clearSelection()
+        refreshBookmark()
+    },
+    update(a) {
+        this.put(a)
+        this.draw(a)
+        clearSelection()
+    },
+    remove(a) {
+        const old = this.byCfi.get(a.cfi) ?? a
+        this.drop(old)
+        if (old.kind === 'highlight') view.deleteAnnotation({ value: old.cfi })
+        clearSelection()
+        refreshBookmark()
+    },
+    // foliate asks for a section's highlights when it lays the section
+    // out, and for each one's look when drawing it
+    attach() {
+        view.addEventListener('create-overlay', ({ detail: { index } }) => {
+            for (const a of this.byIndex.get(index) ?? []) this.draw(a)
+        })
+        view.addEventListener('draw-annotation', ({ detail: { draw, annotation } }) => {
+            const a = this.byCfi.get(annotation.value)
+            if (!a) return
+            const color = colors[a.color] ?? colors.yellow
+            if (a.style === 'underline') draw(Overlayer.underline, { color, width: 2.5 })
+            else draw(Overlayer.highlight, { color })
+        })
+        view.addEventListener('show-annotation', ({ detail: { value, range } }) => {
+            this.clickedAt = Date.now()
+            const a = this.byCfi.get(value)
+            if (a) announce(range.startContainer.ownerDocument ?? range.commonAncestorContainer.ownerDocument, range, a)
+        })
+    },
+}
+
+// Where a range is, in the page's coordinates (the section's frame sits
+// somewhere in the page, scrolled by the paginator)
+function rectOf(doc, range) {
+    const r = range.getBoundingClientRect()
+    const frame = doc.defaultView?.frameElement?.getBoundingClientRect() ?? { left: 0, top: 0 }
+    const page = view.getBoundingClientRect()
+    // A range across pages has a box that spans them; keep it on screen
+    const left = Math.max(page.left, Math.min(page.right, frame.left + r.left))
+    const right = Math.max(page.left, Math.min(page.right, frame.left + r.right))
+    return { x: left, y: frame.top + r.top, width: Math.max(1, right - left), height: r.height }
+}
+
+function indexOfDoc(doc) {
+    return view.renderer.getContents?.().find(c => c.doc === doc)?.index
+}
+
+// Range helpers: is point p before point q, and do two ranges overlap
+const before = (doc, [pn, po], [qn, qo]) => {
+    const r = doc.createRange()
+    r.setStart(pn, po)
+    return r.comparePoint(qn, qo) === 1
+}
+const startOf = r => [r.startContainer, r.startOffset]
+const endOf = r => [r.endContainer, r.endOffset]
+
+// The section's highlights a range touches, with their ranges
+function overlapping(doc, index, range) {
+    const out = []
+    for (const a of Notes.byIndex.get(index) ?? []) {
+        if (a.kind !== 'highlight') continue
+        let r
+        try {
+            r = view.resolveCFI(a.cfi).anchor(doc)
+        } catch {
+            continue
+        }
+        if (!r?.startContainer) continue
+        if (before(doc, startOf(range), endOf(r)) && before(doc, startOf(r), endOf(range)))
+            out.push({ a, r })
+    }
+    return out
+}
+
+// Tell QML about a selection (new, or an existing highlight clicked). A
+// selection over highlights already there becomes one with them: inside
+// a single one, it's that one (as if clicked); otherwise it reaches from
+// the earliest start to the latest end, and they're replaced by it.
+function announce(doc, range, existing) {
+    const index = indexOfDoc(doc)
+    if (index == null) return
+    let merges = []
+    if (!existing) {
+        const hits = overlapping(doc, index, range)
+        const inside = hits.find(({ r }) => !before(doc, startOf(range), startOf(r)) && !before(doc, endOf(r), endOf(range)))
+        if (inside) {
+            existing = inside.a
+            range = inside.r
+        } else if (hits.length) {
+            const union = range.cloneRange()
+            for (const { r } of hits) {
+                if (before(doc, startOf(r), startOf(union))) union.setStart(...startOf(r))
+                if (before(doc, endOf(union), endOf(r))) union.setEnd(...endOf(r))
+            }
+            range = union
+            merges = hits.map(({ a }) => a.id)
+        }
+    }
+    Notes.current = { doc, range }
+    send('selection', {
+        merges,
+        cfi: existing?.cfi ?? view.getCFI(index, range),
+        text: existing?.text ?? range.toString().replace(/\s+/g, ' ').trim(),
+        rect: rectOf(doc, range),
+        annotation: existing?.id ?? null,
+        color: existing?.color ?? null,
+        style: existing?.style ?? null,
+    })
+}
+
+function clearSelection() {
+    const doc = Notes.current?.doc
+    doc?.getSelection()?.removeAllRanges()
+    for (const { doc } of view?.renderer.getContents?.() ?? []) doc.getSelection()?.removeAllRanges()
+    Notes.current = null
+    Visual.stop(false)
+}
+
+// A mouse selection, once the button's up
+function onPointerUp(doc) {
+    if (Visual.active) return
+    setTimeout(() => {
+        const sel = doc.getSelection()
+        if (!sel || sel.isCollapsed || !sel.toString().trim()) return
+        announce(doc, sel.getRangeAt(0))
+    }, 0)
+}
+
+// Whether the page shows a bookmark: its id, or null
+let lastLocation = null
+function bookmarkOn(detail) {
+    const range = detail?.range
+    if (!range) return null
+    const doc = range.startContainer.ownerDocument
+    const index = indexOfDoc(doc)
+    for (const a of Notes.byIndex.get(index) ?? []) {
+        if (a.kind !== 'bookmark') continue
+        try {
+            const at = view.resolveCFI(a.cfi).anchor(doc)
+            const node = at.startContainer ?? at
+            const offset = at.startOffset ?? 0
+            if (range.comparePoint(node, offset) === 0) return a.id
+        } catch {}
+    }
+    return null
+}
+
+function refreshBookmark() {
+    if (lastLocation) send('bookmark', { id: bookmarkOn(lastLocation) })
+}
+
+// Visual mode, vim's: v starts a selection on the page's first word, the
+// motions grow it (h l by letter, w e b by word, j k by line, ( ) by
+// sentence, { } by paragraph, 0 $ to the line's ends, o swaps its ends),
+// y or Enter hand it to QML's menu, Esc or v let go. Its keys stay here;
+// everything else goes to QML as usual.
+const Visual = {
+    active: false,
+    doc: null,
+    start() {
+        const range = lastLocation?.range
+        if (!range) return
+        const doc = range.startContainer.ownerDocument
+        const sel = doc.getSelection()
+        this.doc = doc
+        // A mouse selection already there carries on; else the first word
+        if (sel.isCollapsed || !sel.toString().trim()) {
+            // The page's first text with letters in it: a page often
+            // starts in an empty element (a page break, an anchor)
+            const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+                acceptNode: n => /\S/.test(n.data) && range.intersectsNode(n)
+                    ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+            })
+            const first = walker.nextNode()
+            if (!first) return
+            const at = first === range.startContainer ? range.startOffset : 0
+            const skip = first.data.slice(at).search(/\S/)
+            sel.collapse(first, at + Math.max(0, skip))
+            sel.modify('extend', 'forward', 'word')
+        }
+        this.active = true
+        send('visual', { active: true })
+    },
+    stop(clear = true) {
+        if (!this.active) return
+        if (clear) this.doc?.getSelection()?.removeAllRanges()
+        this.active = false
+        send('visual', { active: false })
+    },
+    motions: {
+        h: ['backward', 'character'], ArrowLeft: ['backward', 'character'],
+        l: ['forward', 'character'], ArrowRight: ['forward', 'character'],
+        w: ['forward', 'word'], e: ['forward', 'word'], b: ['backward', 'word'],
+        j: ['forward', 'line'], ArrowDown: ['forward', 'line'],
+        k: ['backward', 'line'], ArrowUp: ['backward', 'line'],
+        ')': ['forward', 'sentence'], '(': ['backward', 'sentence'],
+        '}': ['forward', 'paragraph'], '{': ['backward', 'paragraph'],
+        '0': ['backward', 'lineboundary'], '^': ['backward', 'lineboundary'],
+        '$': ['forward', 'lineboundary'],
+    },
+    key(e) {
+        const sel = this.doc?.getSelection()
+        if (!sel) return this.stop()
+        const k = e.key
+        if (k === 'Escape' || k === 'v' || k === 'q') return this.stop()
+        if (k === 'y' || k === 'Enter') {
+            if (sel.isCollapsed) return this.stop()
+            this.active = false
+            send('visual', { active: false })
+            announce(this.doc, sel.getRangeAt(0))
+            return
+        }
+        if (k === 'o') {
+            sel.setBaseAndExtent(sel.focusNode, sel.focusOffset, sel.anchorNode, sel.anchorOffset)
+            return this.reveal()
+        }
+        const m = this.motions[k]
+        if (!m) return
+        sel.modify('extend', ...m)
+        this.reveal()
+    },
+    // Keep the moving end on screen: turn the page (or scroll) after it
+    reveal() {
+        const sel = this.doc.getSelection()
+        if (!sel.focusNode) return
+        const r = this.doc.createRange()
+        r.setStart(sel.focusNode, sel.focusOffset)
+        r.collapse(true)
+        const rects = r.getClientRects()
+        const box = rects.length ? rects[0] : r.getBoundingClientRect()
+        const frame = this.doc.defaultView.frameElement.getBoundingClientRect()
+        const page = view.getBoundingClientRect()
+        if (style?.flow === 'scrolled') {
+            const y = frame.top + box.top
+            if (y > page.bottom - 40) Scroller.by(y - page.bottom + 120)
+            else if (y < page.top + 40) Scroller.by(y - page.top - 120)
+            return
+        }
+        const x = frame.left + box.left
+        if (x > page.right) view.renderer.next()
+        else if (x < page.left) view.renderer.prev()
+    },
+}
+
 const flatten = (items, depth = 0, out = []) => {
     for (const item of items ?? []) {
         out.push({ label: (item.label ?? '').trim(), href: item.href ?? '', depth })
@@ -246,6 +545,7 @@ function onKeydown(e) {
     if (['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock'].includes(e.key)) return
     if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) return
     e.preventDefault()
+    if (Visual.active && !e.ctrlKey && !e.altKey) return Visual.key(e)
     send('key', { key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey })
 }
 
@@ -256,6 +556,15 @@ function onClick(e, doc) {
     if (doc.getSelection()?.toString()) return
     if (e.target.closest?.('a[href]')) return
     if (style?.flow !== 'paginated') return
+    if (Visual.active) return
+    // After the highlight layer has had the click: one on a highlight
+    // opens its menu instead
+    setTimeout(() => turnFromClick(e, doc), 0)
+}
+
+function turnFromClick(e, doc) {
+    if (Date.now() - Notes.clickedAt < 300) return
+    if (doc.getSelection()?.toString()) return
     const x = e.clientX - (doc.defaultView?.scrollX ?? 0)
     const width = view.getBoundingClientRect().width
     // The frame's coordinates are its own; map them to the view's
@@ -284,7 +593,7 @@ function onWheel(e) {
     else view.prev()
 }
 
-async function open({ url, position }) {
+async function open({ url, position, annotations }) {
     view?.remove()
     view = document.createElement('foliate-view')
     document.body.append(view)
@@ -295,6 +604,8 @@ async function open({ url, position }) {
         return
     }
     const { book } = view
+    Notes.reset(annotations)
+    Notes.attach()
     book.transformTarget?.addEventListener('data', ({ detail }) => {
         const type = detail.type
         detail.data = Promise.resolve(detail.data)
@@ -308,9 +619,14 @@ async function open({ url, position }) {
         doc.addEventListener('keydown', onKeydown)
         doc.addEventListener('click', e => onClick(e, doc))
         doc.addEventListener('wheel', onWheel, { passive: false })
+        doc.addEventListener('pointerup', () => onPointerUp(doc))
     })
-    view.addEventListener('relocate', ({ detail }) => send('relocated', {
+    view.addEventListener('relocate', ({ detail }) => (lastLocation = detail, send('relocated', {
         cfi: detail.cfi,
+        // For a bookmark here: the page's start, and its first words
+        pageCfi: detail.cfi ? CFI.collapse(detail.cfi) : '',
+        excerpt: detail.range?.toString().replace(/\s+/g, ' ').trim().slice(0, 160) ?? '',
+        bookmark: bookmarkOn(detail),
         fraction: detail.fraction,
         location: detail.location,
         section: detail.section,
@@ -325,7 +641,7 @@ async function open({ url, position }) {
         }),
         minutesLeftInSection: detail.time?.section,
         minutesLeft: detail.time?.total,
-    }))
+    })))
     applyStyle()
 
     send('opened', {
@@ -369,6 +685,11 @@ const commands = {
         root.style.opacity = '0.999'
         requestAnimationFrame(() => requestAnimationFrame(() => root.style.opacity = ''))
     },
+    addAnnotation: a => Notes.add(a),
+    updateAnnotation: a => Notes.update(a),
+    removeAnnotation: a => Notes.remove(a),
+    clearSelection: () => clearSelection(),
+    visual: () => Visual.active ? Visual.stop() : Visual.start(),
     back: () => view?.history.back(),
     forward: () => view?.history.forward(),
 }
