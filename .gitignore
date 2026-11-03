@@ -1,0 +1,4 @@
+build/
+*.pkg.tar.zst
+src/dogear/
+pkg/

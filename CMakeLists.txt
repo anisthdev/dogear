@@ -1,0 +1,53 @@
+cmake_minimum_required(VERSION 3.21)
+project(dogear VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick Sql WebEngineQuick WebChannel)
+qt_standard_project_setup(REQUIRES 6.5)
+
+qt_add_executable(dogear src/main.cpp)
+
+# Before qt_add_qml_module, or they register as ordinary types
+set_source_files_properties(qml/Theme.qml qml/ReadingTheme.qml qml/KeyEvents.qml
+    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
+qt_add_qml_module(dogear
+    URI Dogear
+    VERSION 1.0
+    SOURCES
+        src/Library.h src/Library.cpp
+        src/TextFile.h src/TextFile.cpp
+        src/SchemeHandler.h src/SchemeHandler.cpp
+        src/WindowWatch.h src/WindowWatch.cpp
+    QML_FILES
+        qml/Main.qml
+        qml/Theme.qml
+        qml/ReadingTheme.qml
+        qml/KeyEvents.qml
+        qml/views/Reader.qml
+        qml/views/TocPanel.qml
+        qml/views/FontPanel.qml
+        qml/views/EmptyPage.qml
+        qml/components/Label.qml
+        qml/components/LinearProgress.qml
+        qml/components/ListKeys.qml
+        qml/components/KeyHelp.qml
+)
+
+# The web side (our reader page and the vendored foliate-js), served from
+# the binary's resources by SchemeHandler as dogear://app/...
+file(GLOB_RECURSE READER_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+    CONFIGURE_DEPENDS reader/*.html reader/*.js reader/*.css)
+qt_add_resources(dogear reader PREFIX / FILES ${READER_FILES})
+
+target_include_directories(dogear PRIVATE src)
+target_compile_definitions(dogear PRIVATE DOGEAR_VERSION="${PROJECT_VERSION}")
+
+target_link_libraries(dogear PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Sql Qt6::WebEngineQuick Qt6::WebChannel)
+
+include(GNUInstallDirs)
+install(TARGETS dogear RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES io.github.anisthdev.Dogear.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

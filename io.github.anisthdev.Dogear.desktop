@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Dogear
+GenericName=Ebook Reader
+Comment=Read EPUB books
+Exec=dogear %f
+Icon=accessories-ebook-reader
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/epub+zip;
+StartupWMClass=io.github.anisthdev.Dogear
