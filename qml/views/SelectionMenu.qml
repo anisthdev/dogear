@@ -2,8 +2,8 @@ import QtQuick
 import Dogear
 
 // The menu by a selection or a clicked highlight: five colours (1–5),
-// highlight or underline (u), a note (n), copy (c), delete (d, for a
-// highlight). Enter highlights in the colour used last; Esc or q lets go
+// highlight or underline (u), a note (n), define (d), copy (c), delete (x,
+// for a highlight). Enter highlights in the colour used last; Esc or q lets go
 // of the selection.
 Item {
     id: root
@@ -28,6 +28,8 @@ Item {
     signal toast(string message)
     // A note to write for this annotation
     signal editNote(var annotation)
+    // Look the selection up
+    signal define
 
     function show() {
         style = existing ? (selection.style || "highlight") : (ReadingTheme.settings.highlightStyle || "highlight");
@@ -83,6 +85,10 @@ Item {
             close(true);
             return true;
         case "d":
+            open = false;
+            define();
+            return true;
+        case "x":
             if (existing) {
                 reader.removeAnnotation(selection.annotation);
                 open = false;
@@ -225,12 +231,16 @@ Item {
                         label: "Note"
                     },
                     {
+                        key: "d",
+                        label: "Define"
+                    },
+                    {
                         key: "c",
                         label: "Copy"
                     }
                 ].concat(root.existing ? [
                         {
-                            key: "d",
+                            key: "x",
                             label: "Delete"
                         }
                     ] : [])

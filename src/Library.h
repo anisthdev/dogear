@@ -9,6 +9,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+class Dictionary;
 class Online;
 class Scanner;
 
@@ -73,6 +74,12 @@ public:
     Q_INVOKABLE void applyOnline(const QString &id, const QVariantMap &candidate);
     Q_INVOKABLE void clearOnline(const QString &id);
     Q_INVOKABLE void skipOnline(const QString &id);
+
+    // Look a word or phrase up (see Dictionary); the answer comes as
+    // defined(request, result)
+    Q_INVOKABLE void define(const QString &request, const QString &text, const QString &language);
+    // Where to put StarDict dictionaries of one's own
+    Q_INVOKABLE QString dictionaryFolder() const;
     // Set the series of books by hand: `name` "" means none; `indexes`
     // match `ids` (0 for no number). resetSeries goes back to the book's
     // own or the folder's.
@@ -105,6 +112,7 @@ signals:
     void startScan(const QStringList &folders);
     void onlineMatches(const QString &request, const QVariantList &candidates, const QString &error);
     void onlineApplied(const QString &id, bool ok, const QString &error);
+    void defined(const QString &request, const QVariantMap &result);
 
 private:
     void reload();
@@ -119,6 +127,7 @@ private:
     QThread m_thread;
     Scanner *m_scanner = nullptr;
     Online *m_online = nullptr;
+    Dictionary *m_dictionary = nullptr;
     QFileSystemWatcher m_watcher;
     QTimer m_rescanTimer;
     static QString s_startFile;

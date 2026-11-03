@@ -34,8 +34,10 @@ Item {
     // Where the page sits in this item, for placing the menu
     readonly property real pageY: web.y
 
-    // A selection was made or a highlight clicked
+    // A selection was made or a highlight clicked; `defined` when visual
+    // mode's d asked for the dictionary instead of the menu
     signal selected
+    signal defineSelection
 
     // The book's search: the query run, matches as they come ([{ cfi,
     // chapter, before, match, after }]), whether it's finished, and which
@@ -290,7 +292,10 @@ Item {
 
         function selection(json) {
             root.selection = JSON.parse(json);
-            root.selected();
+            if (root.selection.intent === "define")
+                root.defineSelection();
+            else
+                root.selected();
         }
 
         function visual(json) {

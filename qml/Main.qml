@@ -64,7 +64,7 @@ Window {
         ["c  C", "Next, previous colours"],
         ["+  -  0", "Larger, smaller, normal text"],
         ["F", "Font (/ filters)"],
-        ["v", "Visual mode: select with h l w b e j k ( ) { } 0 $, y to finish"],
+        ["v", "Visual mode: select with h l w b e j k ( ) { } 0 $, y to finish, d to define"],
         ["m", "Bookmark this page (again: take it off)"],
         ["a", "Highlights and bookmarks"],
         ["/", "Search this book (w: whole words)"],
@@ -128,6 +128,8 @@ Window {
     function handleKey(e) {
         if (inputDialog.open)
             return inputDialog.handleKey(e);
+        if (definition.open)
+            return definition.handleKey(e);
         if (selectionMenu.open)
             return selectionMenu.handleKey(e);
         if (matchPanel.open)
@@ -375,6 +377,7 @@ Window {
         visible: win.mode === "reader" && hasBook
         onKeyPressed: event => win.handleKey(event)
         onSelected: selectionMenu.show()
+        onDefineSelection: win.define()
         onFailed: message => win.toast(message)
     }
 
@@ -391,10 +394,28 @@ Window {
         tagPanel: tagPanel
     }
 
+    function define() {
+        const s = reader.selection;
+        if (!s)
+            return;
+        definition.lookup(s.text, s.rect, reader.details?.language ?? "");
+        reader.clearSelection();
+    }
+
+    DefinitionCard {
+        id: definition
+
+        reader: reader
+        onToast: message => win.toast(message)
+        onOpenChanged: if (!open && win.mode === "reader")
+            reader.focusPage()
+    }
+
     SelectionMenu {
         id: selectionMenu
 
         reader: reader
+        onDefine: win.define()
         onToast: message => win.toast(message)
         onEditNote: annotation => win.editNote(annotation)
         onOpenChanged: if (!open && win.mode === "reader")
@@ -433,7 +454,7 @@ Window {
             id: visualLabel
 
             anchors.centerIn: parent
-            text: "Visual · h l w b e j k ( ) { } 0 $ to select · o other end · y done · Esc cancel"
+            text: "Visual · h l w b e j k ( ) { } 0 $ to select · o other end · y done · d define · Esc cancel"
             color: Theme.on_primary_container
             font.pixelSize: 12
         }

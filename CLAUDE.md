@@ -9,7 +9,7 @@ An ebook reader and library, like Foliate but ours. App ID `io.github.anisthdev.
 3. **Annotations** (done): highlights, notes, bookmarks, visual mode, one panel, Markdown to the clipboard.
 4. **Search** (done): in the book (`/`, panel + n/N), across every book's text (Ctrl+f, FTS5).
 5. **Metadata online** (done): Open Library (Google Books with a key); ISBN matches by themselves, the rest by `F`/`f` with a picker; hand edits win.
-6. **Dictionary** (sdcv/StarDict, Wiktionary fallback) and **TTS** (speech-dispatcher, Piper if installed; foliate-js `tts.js` gives SSML).
+6. **Dictionary**: StarDict through sdcv, then Wiktionary (`d`). No text-to-speech: the user decided Dogear won't have it.
 7. **OPDS** catalogues (foliate-js `opds.js`).
 8. **PDF** later, through pdf.js (left out of `reader/foliate/vendor` until then).
 
@@ -31,6 +31,7 @@ src/Library.*          QML singleton: the books QML sees, folders, watching, ope
 src/Database.*         the SQLite file ($XDG_DATA_HOME/dogear/library.db), its schema (user_version), cover thumbnails
 src/Scanner.*          library scan on its own thread; record() hashes, reads and upserts one file
 src/Online.*           Open Library / Google Books: ISBN lookups, searches, applying a match (book_fields 'online', tags, cover)
+src/Dictionary.*       word lookups: sdcv (StarDict) first, then Wiktionary's REST definitions
 src/Epub.*             what an EPUB says (OPF metadata, series, cover) and its sections' text with chapter labels (nav/NCX), read from the zip with libzip
 src/SchemeHandler.*    dogear://app/...: reader page from :/reader, qwebchannel.js, books as /book/<id>
 src/TextFile.*         watched text file (Quickshell's FileView isn't available here): colors.css, fonts.conf
@@ -87,6 +88,13 @@ Every QML file imports `Dogear` (its own module) rather than relative paths. Sin
 - Tags from the web (source 'online', replaced with each match, removable like the book's): genres named in the subjects (a fixed list in `Online::cleanSubjects`; in a list over 20 a genre must be named twice), else up to five short English topics. A tag the book already has stays the book's.
 - Covers from the web are kept as `<id>-online.jpg`; the EPUB's comes first.
 - QML's JavaScript here has no `Array.prototype.flatMap`: use loops (`LibraryView.allBooks`).
+
+## Dictionary
+
+- `d` in the selection menu (delete is `x` there now) or in visual mode (straight to the card, `intent: 'define'`) looks the selection up; DefinitionCard sits under the word (over it if there's no room): j/k scroll, o Wiktionary page, y copy, q/Esc/Enter close.
+- `Dictionary::forms`: the selection less surrounding punctuation, lower case, then plural/tense endings stripped (ies→y, es, s, doubled consonant + ed/ing, ed, ing, 's); each form is tried, offline then online.
+- Offline: `sdcv -n -j -e -0 -1 -2 <$XDG_DATA_HOME/dogear/dictionaries> word` (it also reads ~/.stardict/dic, /usr/share/stardict/dic, $STARDICT_DATA_DIR); each dictionary's answer is one entry, senses split on blank lines. Install StarDict files (.ifo/.idx/.dict[.dz]) in any of those folders.
+- Online: `en.wiktionary.org/api/rest_v1/page/definition/{word}`, the section for the book's language (else English), up to six senses per part of speech, HTML made plain. `[dictionary] online=false` turns it off.
 
 ## The reader page
 

@@ -371,7 +371,7 @@ function overlapping(doc, index, range) {
 // selection over highlights already there becomes one with them: inside
 // a single one, it's that one (as if clicked); otherwise it reaches from
 // the earliest start to the latest end, and they're replaced by it.
-function announce(doc, range, existing) {
+function announce(doc, range, existing, intent = null) {
     const index = indexOfDoc(doc)
     if (index == null) return
     let merges = []
@@ -393,6 +393,7 @@ function announce(doc, range, existing) {
     }
     Notes.current = { doc, range }
     send('selection', {
+        intent,
         merges,
         cfi: existing?.cfi ?? view.getCFI(index, range),
         text: existing?.text ?? range.toString().replace(/\s+/g, ' ').trim(),
@@ -498,11 +499,12 @@ const Visual = {
         if (!sel) return this.stop()
         const k = e.key
         if (k === 'Escape' || k === 'v' || k === 'q') return this.stop()
-        if (k === 'y' || k === 'Enter') {
+        if (k === 'y' || k === 'Enter' || k === 'd') {
             if (sel.isCollapsed) return this.stop()
             this.active = false
             send('visual', { active: false })
-            announce(this.doc, sel.getRangeAt(0))
+            // d: straight to the dictionary, no menu
+            announce(this.doc, sel.getRangeAt(0), null, k === 'd' ? 'define' : null)
             return
         }
         if (k === 'o') {

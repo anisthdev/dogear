@@ -17,6 +17,7 @@
 
 #include "Database.h"
 #include "Epub.h"
+#include "Dictionary.h"
 #include "Online.h"
 #include "Scanner.h"
 
@@ -68,6 +69,10 @@ Library::Library(QObject *parent)
     connect(m_online, &Online::changed, this, &Library::reload);
     connect(m_online, &Online::matches, this, &Library::onlineMatches);
     connect(m_online, &Online::applied, this, &Library::onlineApplied);
+
+    m_dictionary = new Dictionary(this);
+    m_dictionary->setOnline(s.value("dictionary/online", true).toBool());
+    connect(m_dictionary, &Dictionary::found, this, &Library::defined);
 
     connect(m_scanner, &Scanner::finished, this, [this] {
         m_online->autoMatch();
@@ -343,6 +348,16 @@ void Library::applyOnline(const QString &id, const QVariantMap &candidate)
 void Library::clearOnline(const QString &id)
 {
     m_online->clear(id);
+}
+
+void Library::define(const QString &request, const QString &text, const QString &language)
+{
+    m_dictionary->lookup(request, text, language);
+}
+
+QString Library::dictionaryFolder() const
+{
+    return Dictionary::folder();
 }
 
 void Library::skipOnline(const QString &id)
