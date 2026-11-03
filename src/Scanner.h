@@ -18,7 +18,7 @@ public:
     // Kept in each row's `scanned`; rows read by an older version are read
     // again, so a better reader (say, of authors' names) reaches every book.
     // Bump it whenever Epub::read or what's stored changes.
-    static constexpr int version = 4;
+    static constexpr int version = 5;
 
     // Hash, read and record one file; its id, or "" if it can't be read.
     // Used by the scan and by Library::open (books outside the folders).

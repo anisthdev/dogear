@@ -46,6 +46,7 @@ Window {
         ["Esc", "Let go: selection, filter, tag, series"],
         ["a", "Add books (copied into the library folder)"],
         ["R", "Look for new books"],
+        ["Ctrl+f", "Search the text of every book"],
         ["?  F1", "These keys"],
         ["q  Ctrl+w", "Quit"]
     ]
@@ -64,6 +65,10 @@ Window {
         ["v", "Visual mode: select with h l w b e j k ( ) { } 0 $, y to finish"],
         ["m", "Bookmark this page (again: take it off)"],
         ["a", "Highlights and bookmarks"],
+        ["/", "Search this book (w: whole words)"],
+        ["n  N", "Next, previous match"],
+        ["Esc", "Clear the search"],
+        ["Ctrl+f", "Search the text of every book"],
         ["s", "Pages or scrolling"],
         ["i", "Dim or invert pictures (dark pages)"],
         ["o", "Open a book"],
@@ -123,6 +128,10 @@ Window {
             return inputDialog.handleKey(e);
         if (selectionMenu.open)
             return selectionMenu.handleKey(e);
+        if (bookSearch.open)
+            return bookSearch.handleKey(e);
+        if (librarySearch.open)
+            return librarySearch.handleKey(e);
         if (annotationsPanel.open)
             return annotationsPanel.handleKey(e);
         if (help.open)
@@ -140,6 +149,10 @@ Window {
 
         if (ctrl && (e.key === Qt.Key_W || e.key === Qt.Key_Q)) {
             win.close();
+            return true;
+        }
+        if (ctrl && e.key === Qt.Key_F) {
+            librarySearch.show();
             return true;
         }
         if (t === "?" || e.key === Qt.Key_F1) {
@@ -255,6 +268,19 @@ Window {
         case "v":
             reader.send("visual");
             return true;
+        case "/":
+            bookSearch.show(reader.searchQuery);
+            return true;
+        case "n":
+            if (reader.searchHits.length)
+                reader.nextHit(1);
+            else if (reader.searchQuery)
+                toast("No matches");
+            return true;
+        case "N":
+            if (reader.searchHits.length)
+                reader.nextHit(-1);
+            return true;
         case "m":
             toast(reader.toggleBookmark() ? "Bookmarked" : "Bookmark taken off");
             return true;
@@ -305,6 +331,12 @@ Window {
             return true;
         case Qt.Key_F1:
             help.open = true;
+            return true;
+        case Qt.Key_Escape:
+            if (reader.searchQuery) {
+                reader.clearSearch();
+                toast("Search cleared");
+            }
             return true;
         }
         return false;
@@ -386,6 +418,148 @@ Window {
             anchors.centerIn: parent
             text: "Visual · h l w b e j k ( ) { } 0 $ to select · o other end · y done · Esc cancel"
             color: Theme.on_primary_container
+            font.pixelSize: 12
+        }
+    }
+
+    // Searching the open book: matches under their chapters
+    SearchPanel {
+        id: bookSearch
+
+        title: "Search this book"
+        placeholder: "Words to find"
+        busy: reader.searching
+        status: {
+            const n = reader.searchHits.length;
+            if (!reader.searchQuery.trim())
+                return "Case and accents don't matter";
+            return n === 0 ? (reader.searching ? "" : "No matches") : `${n} ${n === 1 ? "match" : "matches"}`;
+        }
+        rows: {
+            const rows = [];
+            let chapter = null;
+            reader.searchHits.forEach((h, i) => {
+                if (h.chapter !== chapter) {
+                    chapter = h.chapter;
+                    rows.push({
+                        header: true,
+                        label: chapter || "Untitled"
+                    });
+                }
+                rows.push({
+                    before: h.before,
+                    match: h.match,
+                    after: h.after,
+                    payload: i
+                });
+            });
+            return rows;
+        }
+        onSearch: (query, whole) => query.trim() ? reader.search(query, whole) : reader.clearSearch()
+        onChosen: i => {
+            close();
+            reader.goToHit(i);
+        }
+        onKeysBack: win.mode === "reader" ? reader.focusPage() : keyCatcher.forceActiveFocus()
+    }
+
+    // Searching every book's text (Library.searchText): passages under
+    // their books
+    SearchPanel {
+        id: librarySearch
+
+        property var results: []
+        property string ran: ""
+
+        title: "Search all books"
+        placeholder: "A quote, a name, a phrase…"
+        sheetWidth: 600
+        status: {
+            if (ran.trim().length < 2)
+                return "Every book's text · case and accents don't matter";
+            const books = new Set(results.map(r => r.book)).size;
+            const n = results.length;
+            return n === 0 ? "No passages found" : `${n >= 200 ? "200+" : n} ${n === 1 ? "passage" : "passages"} in ${books} ${books === 1 ? "book" : "books"}`;
+        }
+        rows: {
+            // Books in the order of their best passage
+            const order = [];
+            const byBook = new Map();
+            for (const r of results) {
+                if (!byBook.has(r.book)) {
+                    byBook.set(r.book, []);
+                    order.push(r);
+                }
+                byBook.get(r.book).push(r);
+            }
+            const rows = [];
+            // Within a book, in reading order
+            for (const list of byBook.values())
+                list.sort((a, b) => a.section - b.section);
+            for (const first of order) {
+                rows.push({
+                    header: true,
+                    label: first.title,
+                    sub: first.authors,
+                    cover: first.cover
+                });
+                for (const r of byBook.get(first.book))
+                    rows.push({
+                        before: r.before,
+                        match: r.match,
+                        after: r.after,
+                        sub: r.chapter,
+                        payload: r
+                    });
+            }
+            return rows;
+        }
+        onSearch: (query, whole) => {
+            ran = query;
+            results = query.trim().length >= 2 ? Library.searchText(query, whole) : [];
+        }
+        onChosen: r => {
+            close();
+            if (reader.openAt(r.path, query, r.section, wholeWords, r.before)) {
+                toc.open = false;
+                fonts.open = false;
+                mode = "reader";
+                reader.focusPage();
+            }
+        }
+        onKeysBack: win.mode === "reader" ? reader.focusPage() : keyCatcher.forceActiveFocus()
+    }
+
+    // Where n/N are, while a search has matches
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: parent.height - height - 60
+        width: hitLabel.implicitWidth + 32
+        height: 36
+        radius: 18
+        color: Theme.secondary_container
+        opacity: win.mode === "reader" && reader.searchQuery && !bookSearch.open && !reader.visual ? 1 : 0
+        visible: opacity > 0
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: Theme.animFast
+            }
+        }
+
+        Label {
+            id: hitLabel
+
+            anchors.centerIn: parent
+            text: {
+                const n = reader.searchHits.length;
+                const q = reader.searchQuery.length > 24 ? reader.searchQuery.slice(0, 24) + "…" : reader.searchQuery;
+                if (n === 0)
+                    return reader.searching ? `Searching “${q}”…` : `No matches for “${q}” · Esc`;
+                const at = reader.searchAt >= 0 ? `${reader.searchAt + 1} of ${n}` : `${n} matches`;
+                return `“${q}” · ${at}${reader.searching ? "+" : ""} · n N · Esc clears`;
+            }
+            color: Theme.on_secondary_container
             font.pixelSize: 12
         }
     }

@@ -81,6 +81,12 @@ public:
     Q_INVOKABLE void removeAnnotation(int id);
     Q_INVOKABLE void copy(const QString &text) const;
 
+    // Passages across the library: { book, title, authors, cover, path,
+    // section, chapter, before, match, after }, best first, at most `limit`.
+    // Words in order as a phrase; the last may be the start of a word
+    // unless `wholeWords`.
+    Q_INVOKABLE QVariantList searchText(const QString &query, bool wholeWords, int limit = 200) const;
+
 signals:
     void foldersChanged();
     void booksChanged();

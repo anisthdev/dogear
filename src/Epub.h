@@ -26,6 +26,17 @@ struct EpubInfo
     QByteArray cover; // the image's bytes, as stored
 };
 
+// One spine item's text, for the full-text index: its place in the
+// reading order (foliate's section index), the chapter it belongs to (from
+// the book's contents) and its words, markup stripped
+struct EpubSection
+{
+    int index = 0;
+    QString chapter;
+    QString text;
+};
+
 namespace Epub {
 std::optional<EpubInfo> read(const QString &path);
+QList<EpubSection> sections(const QString &path);
 }

@@ -7,7 +7,7 @@ An ebook reader and library, like Foliate but ours. App ID `io.github.anisthdev.
 1. **Reader core** (done): open an EPUB, pages or scrolling, colour schemes, contents, position saved and restored, keys.
 2. **Library** (done): folders indexed in place and watched; adding copies into the first folder. Cover grid and list, sort, `/` filter; it opens on the book read last.
 3. **Annotations** (done): highlights, notes, bookmarks, visual mode, one panel, Markdown to the clipboard.
-4. **Search**: in the book (foliate-js `search.js`), across the library (SQLite FTS5).
+4. **Search** (done): in the book (`/`, panel + n/N), across every book's text (Ctrl+f, FTS5).
 5. **Metadata online**: Open Library, then Google Books, EPUB's own as fallback. ISBN matches apply by themselves; title searches show a picker. Hand edits are never overwritten.
 6. **Dictionary** (sdcv/StarDict, Wiktionary fallback) and **TTS** (speech-dispatcher, Piper if installed; foliate-js `tts.js` gives SSML).
 7. **OPDS** catalogues (foliate-js `opds.js`).
@@ -30,7 +30,7 @@ src/main.cpp           WebEngine set-up (must come before the app), command line
 src/Library.*          QML singleton: the books QML sees, folders, watching, opening, progress, adding
 src/Database.*         the SQLite file ($XDG_DATA_HOME/dogear/library.db), its schema (user_version), cover thumbnails
 src/Scanner.*          library scan on its own thread; record() hashes, reads and upserts one file
-src/Epub.*             what an EPUB says (OPF metadata, series, cover), read from the zip with libzip
+src/Epub.*             what an EPUB says (OPF metadata, series, cover) and its sections' text with chapter labels (nav/NCX), read from the zip with libzip
 src/SchemeHandler.*    dogear://app/...: reader page from :/reader, qwebchannel.js, books as /book/<id>
 src/TextFile.*         watched text file (Quickshell's FileView isn't available here): colors.css, fonts.conf
 src/WindowWatch.*      signals when the window is shown again (blank page after a hidden workspace)
@@ -38,7 +38,7 @@ qml/Main.qml           the window, overlays, every key binding (handleKey)
 qml/Theme.qml          singleton: app palette (matugen or Material baseline), fonts, motion
 qml/ReadingTheme.qml   singleton: page colours and type, settings in $XDG_CONFIG_HOME/dogear/dogear.conf
 qml/KeyEvents.qml      singleton: the page's key events as Qt-style ones
-qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel
+qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel, SearchPanel (both searches)
 qml/components/        Cover (rounded, placeholder card); Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
 reader/index.html, reader.js   the page: foliate-js driven over the web channel
 reader/foliate/        foliate-js, vendored (commit in VERSION, MIT); don't edit, update whole
@@ -69,6 +69,13 @@ Every QML file imports `Dogear` (its own module) rather than relative paths. Sin
 - Visual mode (`v`, reader.js `Visual`): starts on the page's first word (skipping empty text nodes), grows with `Selection.modify` (h l w e b j k ( ) { } 0 ^ $, o swaps ends), turns the page or scrolls to keep the moving end in view; y/Enter hand it to the menu, Esc/v/q drop it. While on, the page keeps its keys.
 - `m` bookmarks the page or takes its bookmark off; a ribbon hangs at the page's top left while it has one (`relocated.bookmark`: a bookmark's CFI inside the page's range).
 - `a` opens AnnotationsPanel: reading order, Enter goes there, n note, y copy, dd delete, Y copies everything as Markdown (chapter headings, highlights as quotes with notes below, bookmarks as items).
+
+## Search
+
+- In the book (`/`): foliate's `view.search` (case and accents ignored; whole words with `w` in the list, Alt+w in the field) streams matches per chapter as `searchResults`, outlined on the page. The page keeps the CFIs (`hits`) and does n/N itself (`hit`: after the last one gone to, else after `lastLocation`, by `CFI.compare`), answering `hitAt` for the counter. Esc in the reader clears it.
+- Every book (Ctrl+f, anywhere): FTS5 table `book_text` (schema v5; book, section = spine index, chapter, text; unicode61 remove_diacritics 2), filled by `Scanner::record` from `Epub::sections`. `Library.searchText` makes the words one phrase (`"a b c" *`, no `*` for whole words), `snippet()` marks the match with \x01/\x02, best 200 by rank; the panel groups by book (best first), passages in reading order. Opening one runs the book search with `jumpSection` and `near` (the passage's text before the match) and goes to that match.
+- SearchPanel: typing searches after 250 ms; Enter/Down to the results (cursor on the first match of each new search, set after the list has the rows); j/k skip headings, Enter/l opens, / back to the field, q/Esc close.
+- `sqlite3` on this machine's PATH is the Android SDK's, without FTS5: use /usr/bin/sqlite3 or Python to look at `book_text`.
 
 ## The reader page
 

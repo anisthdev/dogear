@@ -37,6 +37,7 @@ qt_add_qml_module(dogear
         qml/views/TagPanel.qml
         qml/views/SelectionMenu.qml
         qml/views/AnnotationsPanel.qml
+        qml/views/SearchPanel.qml
         qml/components/InputDialog.qml
         qml/components/TextButton.qml
         qml/views/LibraryView.qml

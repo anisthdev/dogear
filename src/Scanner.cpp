@@ -170,6 +170,26 @@ QString Scanner::record(const QString &path, const QString &connection, const QS
         }
     }
 
+    // The text, for searching the library: replaced whole, in one go
+    {
+        const QList<EpubSection> sections = Epub::sections(fi.absoluteFilePath());
+        db.transaction();
+        QSqlQuery d(db);
+        d.prepare("DELETE FROM book_text WHERE book = ?");
+        d.addBindValue(id);
+        d.exec();
+        QSqlQuery i(db);
+        i.prepare("INSERT INTO book_text (book, section, chapter, text) VALUES (?, ?, ?, ?)");
+        for (const EpubSection &s : sections) {
+            i.addBindValue(id);
+            i.addBindValue(s.index);
+            i.addBindValue(s.chapter);
+            i.addBindValue(s.text);
+            i.exec();
+        }
+        db.commit();
+    }
+
     // The file changed in place (its metadata edited elsewhere, say): a
     // new hash, so a new row. It takes the old row's reading, which is
     // then hidden.

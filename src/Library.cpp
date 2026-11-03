@@ -416,6 +416,52 @@ void Library::removeAnnotation(int id)
     q.exec();
 }
 
+QVariantList Library::searchText(const QString &query, bool wholeWords, int limit) const
+{
+    // The query's words as one FTS phrase; quotes and operators can't get in
+    static const QRegularExpression word(R"([\p{L}\p{N}]+)");
+    QStringList words;
+    for (auto it = word.globalMatch(query); it.hasNext();)
+        words.append(it.next().captured());
+    if (words.isEmpty())
+        return {};
+    const QString phrase = '"' + words.join(' ') + '"' + (wholeWords ? QString() : QStringLiteral(" *"));
+
+    QSqlQuery q(m_db);
+    q.prepare(R"(SELECT t.book, t.section, t.chapter,
+                        snippet(book_text, 3, char(1), char(2), '…', 14),
+                        b.title, b.authors, b.cover, b.path
+                 FROM book_text t JOIN books b ON b.id = t.book
+                 WHERE book_text MATCH ? AND b.missing = 0
+                 ORDER BY rank LIMIT ?)");
+    q.addBindValue(phrase);
+    q.addBindValue(limit);
+    if (!q.exec()) {
+        qWarning() << "search:" << q.lastError().text();
+        return {};
+    }
+    QVariantList out;
+    while (q.next()) {
+        // snippet marks the match with \x01 … \x02
+        const QString s = q.value(3).toString();
+        const int a = s.indexOf(QChar(1)), b = s.indexOf(QChar(2));
+        const QString cover = q.value(6).toString();
+        out.append(QVariantMap{
+            {"book", q.value(0)},
+            {"section", q.value(1).toInt()},
+            {"chapter", q.value(2).toString()},
+            {"before", a < 0 ? s : s.left(a)},
+            {"match", a < 0 ? QString() : s.mid(a + 1, b - a - 1)},
+            {"after", b < 0 ? QString() : QString(s.mid(b + 1)).remove(QChar(1)).remove(QChar(2))},
+            {"title", q.value(4).toString()},
+            {"authors", q.value(5).toString()},
+            {"cover", cover.isEmpty() ? QString() : QUrl::fromLocalFile(cover).toString()},
+            {"path", q.value(7).toString()},
+        });
+    }
+    return out;
+}
+
 void Library::copy(const QString &text) const
 {
     QGuiApplication::clipboard()->setText(text);

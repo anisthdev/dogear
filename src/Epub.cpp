@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QHash>
 #include <QRegularExpression>
+#include <QSet>
 #include <QUrl>
 #include <QXmlStreamReader>
 #include <zip.h>
@@ -259,3 +260,147 @@ std::optional<EpubInfo> Epub::read(const QString &path)
     }
     return info;
 }
+
+namespace {
+
+// Text of an (X)HTML document: character data outside head, script and
+// style, with a space after each block so words don't run together. Not
+// well-formed? Tags stripped by pattern instead.
+QString textOf(const QByteArray &html)
+{
+    static const QSet<QString> blocks = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+                                         "tr", "td", "th", "blockquote", "section", "article", "dd", "dt",
+                                         "pre", "figcaption", "aside", "header", "footer", "hr", "title"};
+    QString out;
+    out.reserve(html.size() / 2);
+    QXmlStreamReader xml(html);
+    int skip = 0;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (xml.isStartElement()) {
+            const auto n = xml.name();
+            if (n == u"head" || n == u"script" || n == u"style")
+                ++skip;
+        } else if (xml.isEndElement()) {
+            const auto n = xml.name();
+            if (n == u"head" || n == u"script" || n == u"style")
+                --skip;
+            else if (blocks.contains(n.toString()))
+                out += ' ';
+        } else if (xml.isCharacters() && skip == 0) {
+            out += xml.text();
+        }
+    }
+    if (xml.hasError() && xml.error() != QXmlStreamReader::PrematureEndOfDocumentError) {
+        QString s = QString::fromUtf8(html);
+        static const QRegularExpression drop(R"(<(head|script|style)\b.*?</\1>)",
+                                             QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression tags("<[^>]*>");
+        s.remove(drop);
+        s.replace(tags, " ");
+        out = s;
+    }
+    return out.simplified();
+}
+
+// href (in the zip, no fragment) -> chapter label, from EPUB 3's nav or
+// EPUB 2's NCX; the first label pointing into a file wins
+QHash<QString, QString> chapters(const Zip &zip, const QString &opfPath, const QString &navHref, const QString &ncxHref)
+{
+    QHash<QString, QString> out;
+    auto note = [&](const QString &base, const QString &href, const QString &label) {
+        const QString file = resolve(base, href);
+        if (!label.trimmed().isEmpty() && !out.contains(file))
+            out.insert(file, label.simplified());
+    };
+    if (!navHref.isEmpty()) {
+        const QString navPath = resolve(opfPath, navHref);
+        if (const auto nav = zip.read(navPath)) {
+            QXmlStreamReader xml(*nav);
+            bool inToc = false;
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (xml.isStartElement() && xml.name() == u"nav")
+                    inToc = xml.attributes().value("http://www.idpf.org/2007/ops", "type").contains(u"toc");
+                else if (xml.isEndElement() && xml.name() == u"nav")
+                    inToc = false;
+                else if (inToc && xml.isStartElement() && xml.name() == u"a") {
+                    const QString href = xml.attributes().value("href").toString();
+                    note(navPath, href, xml.readElementText(QXmlStreamReader::IncludeChildElements));
+                }
+            }
+        }
+    }
+    if (out.isEmpty() && !ncxHref.isEmpty()) {
+        const QString ncxPath = resolve(opfPath, ncxHref);
+        if (const auto ncx = zip.read(ncxPath)) {
+            QXmlStreamReader xml(*ncx);
+            QString label;
+            while (!xml.atEnd()) {
+                xml.readNext();
+                if (!xml.isStartElement())
+                    continue;
+                if (xml.name() == u"text")
+                    label = xml.readElementText();
+                else if (xml.name() == u"content")
+                    note(ncxPath, xml.attributes().value("src").toString(), label);
+            }
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+QList<EpubSection> Epub::sections(const QString &path)
+{
+    Zip zip(path);
+    if (!zip.ok())
+        return {};
+    const QString opfPath = rootFile(zip);
+    const auto opf = opfPath.isEmpty() ? std::nullopt : zip.read(opfPath);
+    if (!opf)
+        return {};
+
+    QHash<QString, Manifest> manifest;
+    QStringList spine;
+    QString navHref, ncxId;
+    QXmlStreamReader xml(*opf);
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement())
+            continue;
+        const auto attrs = xml.attributes();
+        if (xml.name() == u"item") {
+            const QString id = attrs.value("id").toString();
+            manifest.insert(id, {attrs.value("href").toString(), attrs.value("media-type").toString(),
+                                 attrs.value("properties").toString()});
+            if (attrs.value("properties").contains(u"nav"))
+                navHref = attrs.value("href").toString();
+        } else if (xml.name() == u"spine") {
+            ncxId = attrs.value("toc").toString();
+        } else if (xml.name() == u"itemref") {
+            spine.append(attrs.value("idref").toString());
+        }
+    }
+    const QHash<QString, QString> labels = chapters(zip, opfPath, navHref, manifest.value(ncxId).href);
+
+    QList<EpubSection> out;
+    QString chapter;
+    for (int i = 0; i < spine.size(); ++i) {
+        const Manifest m = manifest.value(spine.at(i));
+        const QString file = resolve(opfPath, m.href);
+        // A section with no contents entry of its own carries on the last
+        chapter = labels.value(file, chapter);
+        if (!m.type.contains("html"))
+            continue;
+        const auto data = zip.read(file, 16 << 20);
+        if (!data)
+            continue;
+        const QString text = textOf(*data);
+        if (!text.isEmpty())
+            out.append({i, chapter, text});
+    }
+    return out;
+}
+

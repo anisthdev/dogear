@@ -37,6 +37,61 @@ Item {
     // A selection was made or a highlight clicked
     signal selected
 
+    // The book's search: the query run, matches as they come ([{ cfi,
+    // chapter, before, match, after }]), whether it's finished, and which
+    // match n/N are on (-1 before the first jump)
+    property string searchQuery: ""
+    property var searchHits: []
+    property bool searching: false
+    property int searchAt: -1
+
+    function search(query, wholeWords) {
+        searchQuery = query;
+        searchHits = [];
+        searchAt = -1;
+        searching = query.trim() !== "";
+        send("search", {
+            query: query,
+            wholeWords: wholeWords
+        });
+    }
+
+    function clearSearch() {
+        searchQuery = "";
+        searchHits = [];
+        searchAt = -1;
+        searching = false;
+        send("clearSearch");
+    }
+
+    // Go to a match by its place in searchHits; n/N (by ±1) go from the
+    // one last gone to, or from the page. The page knows the order.
+    function goToHit(i) {
+        send("hit", {
+            index: i
+        });
+    }
+
+    function nextHit(by) {
+        send("hit", {
+            by: by
+        });
+    }
+
+    // From the library's search: open the book on that passage
+    function openAt(path, query, section, wholeWords, near) {
+        if (!openFile(path))
+            return false;
+        pendingJump = {
+            query: query,
+            section: section,
+            wholeWords: wholeWords,
+            near: near ?? ""
+        };
+        return true;
+    }
+    property var pendingJump: null
+
     property bool pageReady: false
     // What Library.open gave for the open book; sent to the page whenever
     // it (re)starts
@@ -51,6 +106,10 @@ Item {
         root.book = book;
         bookId = book.id;
         annotations = Library.annotations(book.id);
+        searchQuery = "";
+        searchHits = [];
+        searchAt = -1;
+        searching = false;
         selection = null;
         visual = false;
         details = null;
@@ -180,8 +239,40 @@ Item {
                 }));
         }
 
+        function searchResults(json) {
+            const r = JSON.parse(json);
+            if (r.query !== root.searchQuery)
+                return;
+            root.searchHits = root.searchHits.concat(r.items.map(h => Object.assign(h, {
+                    chapter: r.chapter
+                })));
+        }
+
+        function hitAt(json) {
+            root.searchAt = JSON.parse(json).index;
+        }
+
+        function searchDone(json) {
+            const r = JSON.parse(json);
+            if (r.query === root.searchQuery)
+                root.searching = false;
+        }
+
         function opened(json) {
             root.details = JSON.parse(json);
+            if (root.pendingJump) {
+                root.searchQuery = root.pendingJump.query;
+                root.searchHits = [];
+                root.searchAt = -1;
+                root.searching = true;
+                root.send("search", {
+                    query: root.pendingJump.query,
+                    wholeWords: root.pendingJump.wholeWords,
+                    jumpSection: root.pendingJump.section,
+                    near: root.pendingJump.near
+                });
+                root.pendingJump = null;
+            }
             Library.saveDetails(root.bookId, root.details.title, root.details.authors);
             root.focusPage();
         }

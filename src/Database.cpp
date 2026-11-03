@@ -92,6 +92,16 @@ bool migrate(QSqlDatabase &db)
         q.exec("CREATE INDEX annotations_book ON annotations (book)");
         q.exec("PRAGMA user_version = 4");
     }
+    if (version < 5) {
+        // Every book's text, one row per section, for searching the whole
+        // library. Case and accents ignored (unicode61, remove_diacritics).
+        if (!q.exec(R"(CREATE VIRTUAL TABLE book_text USING fts5(
+                book UNINDEXED, section UNINDEXED, chapter UNINDEXED, text,
+                tokenize = 'unicode61 remove_diacritics 2'
+            ))"))
+            return false;
+        q.exec("PRAGMA user_version = 5");
+    }
     return true;
 }
 

@@ -530,6 +530,86 @@ const Visual = {
     },
 }
 
+// Searching the book: foliate finds matches section by section and
+// outlines them on the page; each section's arrive as `searchResults`
+// { query, chapter, items: [{ cfi, before, match, after }] }, then
+// `searchDone` { query, count }. A newer search makes an older one stop.
+const norm = t => (t ?? '').replace(/…/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+let searchRun = 0
+// Every match's CFI, in book order, and the one n/N went to last
+let hits = []
+let hitAt = -1
+
+// n / N: from the match gone to last, else from where the reader is
+function hit({ by = 1, index = null }) {
+    if (!hits.length) return
+    if (index != null) hitAt = index
+    else if (hitAt < 0) {
+        const here = lastLocation?.cfi
+        const after = here ? hits.findIndex(c => CFI.compare(c, here) > 0) : 0
+        hitAt = by > 0 ? (after < 0 ? 0 : after) : (after <= 0 ? hits.length - 1 : after - 1)
+    } else hitAt = (hitAt + by + hits.length) % hits.length
+    view.goTo(hits[hitAt])
+    send('hitAt', { index: hitAt })
+}
+
+// `jumpSection`: go to the first match in that section as soon as it's
+// found (a passage picked in the library's search)
+async function search({ query, wholeWords = false, section = null, jumpSection = null, near = '' }) {
+    const run = ++searchRun
+    await opening
+    view.clearSearch()
+    hits = []
+    hitAt = -1
+    if (!query?.trim()) return
+    let count = 0
+    let first = null  // index in hits of the jumped-to match
+    const iter = view.search({
+        query,
+        matchCase: false,
+        matchDiacritics: false,
+        matchWholeWords: wholeWords,
+        ...(section != null ? { index: section } : {}),
+    })
+    for await (const result of iter) {
+        if (run !== searchRun) return
+        if (result === 'done') break
+        // A whole-book search: one chapter's matches at a time
+        const group = result.subitems ?? (result.cfi ? [result] : null)
+        if (!group) continue
+        const items = group.map(({ cfi, excerpt }) => ({
+            cfi,
+            before: excerpt?.pre ?? '',
+            match: excerpt?.match ?? '',
+            after: excerpt?.post ?? '',
+        }))
+        const from = hits.length
+        hits.push(...items.map(i => i.cfi))
+        count += items.length
+        send('searchResults', { query, chapter: result.label ?? '', items })
+        if (jumpSection != null && first == null) {
+            let index = -1
+            try {
+                index = view.resolveCFI(items[0].cfi).index
+            } catch {}
+            if (index === jumpSection) {
+                // The match whose text before it is the passage's, else the
+                // chapter's first
+                const tail = norm(near).slice(-24)
+                const at = tail ? items.findIndex(i => norm(i.before).endsWith(tail)) : -1
+                first = from + Math.max(0, at)
+                hit({ index: first })
+            }
+        }
+    }
+    if (run !== searchRun) return
+    send('searchDone', { query, count })
+    // From the library's search: straight to the passage
+    // The section had no match the book's search could find (the index
+    // and foliate split words a little differently): its first anyway
+    if (jumpSection != null && first == null && hits.length) hit({ index: 0 })
+}
+
 const flatten = (items, depth = 0, out = []) => {
     for (const item of items ?? []) {
         out.push({ label: (item.label ?? '').trim(), href: item.href ?? '', depth })
@@ -593,7 +673,15 @@ function onWheel(e) {
     else view.prev()
 }
 
-async function open({ url, position, annotations }) {
+// Done when the book is open and laid out (search waits for it)
+let opening = Promise.resolve()
+function open(args) {
+    searchRun++
+    opening = openBook(args)
+    return opening
+}
+
+async function openBook({ url, position, annotations }) {
     view?.remove()
     view = document.createElement('foliate-view')
     document.body.append(view)
@@ -690,6 +778,14 @@ const commands = {
     removeAnnotation: a => Notes.remove(a),
     clearSelection: () => clearSelection(),
     visual: () => Visual.active ? Visual.stop() : Visual.start(),
+    search,
+    clearSearch: () => {
+        searchRun++
+        hits = []
+        hitAt = -1
+        view?.clearSearch()
+    },
+    hit,
     back: () => view?.history.back(),
     forward: () => view?.history.forward(),
 }
