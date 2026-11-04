@@ -344,6 +344,19 @@ Entry readEntry(QXmlStreamReader &xml, const QUrl &base)
     return e;
 }
 
+// Project Gutenberg's lists give every book the same 22 px icon, and their
+// entries are links to the book, not books. Its covers are at a fixed
+// address from the book's number; "" for anything else.
+QString gutenbergCover(const QString &href)
+{
+    static const QRegularExpression book(R"(^/ebooks/(\d+)\.opds$)");
+    const QUrl url(href);
+    const auto m = book.match(url.path());
+    if (!m.hasMatch() || !(url.host() == "gutenberg.org" || url.host().endsWith(".gutenberg.org")))
+        return {};
+    return QStringLiteral("https://www.gutenberg.org/cache/epub/%1/pg%1.cover.medium.jpg").arg(m.captured(1));
+}
+
 void addEntry(Group &group, const Entry &e)
 {
     const bool isBook = std::any_of(e.links.begin(), e.links.end(), [](const Link &l) {
@@ -362,12 +375,15 @@ void addEntry(Group &group, const Entry &e)
         place = std::find_if(e.links.begin(), e.links.end(), [](const Link &l) { return l.rels.isEmpty(); });
     if (place == e.links.end())
         return;
+    const QString icon = e.thumb.isEmpty() ? e.cover : e.thumb;
+    const QString cover = gutenbergCover(place->href);
     group.nav.append(QVariantMap{
         {"kind", "nav"},
         {"title", e.title},
         {"summary", e.summary},
         {"authors", e.authors},
-        {"thumb", e.thumb.isEmpty() ? e.cover : e.thumb},
+        {"thumb", cover.isEmpty() ? icon : cover},
+        {"icon", icon},
         {"url", place->href},
     });
 }

@@ -447,6 +447,8 @@ Item {
                     height: 76
                     radius: 6
                     source: row.pictured ? row.item.thumb ?? "" : ""
+                    fallback: row.item.icon ?? ""
+                    measure: true
                     title: ""
                 }
 

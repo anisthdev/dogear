@@ -26,11 +26,12 @@ class QNetworkReply;
 // `search` is a template, or an OpenSearch description to fetch; pass it
 // to search(). An item is one of:
 //   { kind: "heading", title }
-//   { kind: "nav", title, summary, authors, thumb, url }
+//   { kind: "nav", title, summary, authors, thumb, icon, url }
 //   { kind: "book", id, title, authors (list), summary, cover, thumb,
 //     publisher, published, language, tags (list), web, formats, others }
 // where formats are the free EPUBs, best first ({ url, title, size }), and
-// others name what else is offered ("PDF", "Kindle"). Every URL in a feed
+// others name what else is offered ("PDF", "Kindle"). `icon` is what the
+// feed gave, for when a `thumb` found elsewhere fails. Every URL in a feed
 // is checked here: only http(s), so a feed can't point at local files.
 class Catalog : public QObject
 {

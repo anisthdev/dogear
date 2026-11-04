@@ -3,7 +3,9 @@ import QtQuick.Effects
 import Dogear
 
 // A book's cover with rounded corners, cropped to the space; books with
-// none get a card with their title and author.
+// none get a card with their title and author. With `measure`, a picture
+// far smaller than the space (a catalogue's icon) sits on the card at its
+// own size, as stretching it would blur it.
 Item {
     id: root
 
@@ -11,8 +13,15 @@ Item {
     property string title
     property string authors
     property real radius: 8
+    // Tried if `source` can't be loaded
+    property string fallback
+    // Load the picture whole, to know its size: `tiny` needs it. Off for
+    // the library's grid, whose covers load at the size they're drawn.
+    property bool measure: false
 
-    readonly property bool hasImage: image.status === Image.Ready
+    readonly property bool loaded: image.status === Image.Ready
+    readonly property bool tiny: measure && loaded && image.implicitHeight < height * 0.6
+    readonly property bool hasImage: loaded && !tiny
 
     Rectangle {
         anchors.fill: parent
@@ -20,8 +29,15 @@ Item {
         radius: root.radius
         color: Theme.surface_container_highest
 
+        Image {
+            anchors.centerIn: parent
+            visible: root.tiny
+            source: visible ? image.source : ""
+        }
+
         Column {
             anchors.centerIn: parent
+            visible: !root.tiny
             width: parent.width - 20
             spacing: 6
 
@@ -61,8 +77,11 @@ Item {
         asynchronous: true
         smooth: true
         mipmap: true
-        sourceSize.height: Math.ceil(root.height * 2)
+        // With a size asked for, Qt stretches small pictures to it
+        sourceSize: root.measure ? undefined : Qt.size(0, Math.ceil(root.height * 2))
         visible: false
+        onStatusChanged: if (status === Image.Error && root.fallback && source != root.fallback)
+            source = root.fallback
     }
 
     MultiEffect {
