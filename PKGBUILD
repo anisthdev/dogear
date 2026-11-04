@@ -28,6 +28,7 @@ build() {
 
 package() {
     DESTDIR="$pkgdir" cmake --install build
-    # foliate-js is compiled into the binary
+    # foliate-js and what it vendors are compiled into the binary
     install -Dm644 "$_name/reader/foliate/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/foliate-js"
+    install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" "$_name/licenses/zip.js" "$_name/licenses/fflate"
 }

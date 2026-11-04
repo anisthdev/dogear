@@ -45,6 +45,7 @@ qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + 
 qml/components/        Cover (rounded, placeholder card); Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
 reader/index.html, reader.js   the page: foliate-js driven over the web channel
 reader/foliate/        foliate-js, vendored (commit in VERSION, MIT); don't edit, update whole
+licenses/              the licences of foliate's vendored zip.js and fflate, which it doesn't carry; installed by the PKGBUILD. pdf.js (Apache) needs its own here in phase 8
 ```
 
 Every QML file imports `Dogear` (its own module) rather than relative paths. Singletons need `QT_QML_SINGLETON_TYPE` set **before** `qt_add_qml_module` in CMakeLists.txt, or they register as plain types and every property reads undefined.
