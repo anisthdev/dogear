@@ -33,7 +33,8 @@ Item {
             user: "typed in",
             book: "the book",
             online: book?.onlineKey?.startsWith("google") ? "Google Books" : "Open Library",
-            file: "the file's name"
+            file: "the file's name",
+            catalog: "the catalogue"
         }[from] ?? "";
     }
 

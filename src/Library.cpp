@@ -74,6 +74,10 @@ Library::Library(QObject *parent)
     m_dictionary->setOnline(s.value("dictionary/online", true).toBool());
     connect(m_dictionary, &Dictionary::found, this, &Library::defined);
 
+    m_catalog = new Catalog(this);
+    m_catalog->setFolder(m_folders.value(0));
+    connect(m_catalog, &Catalog::saved, this, &Library::rescan);
+
     connect(m_scanner, &Scanner::finished, this, [this] {
         m_online->autoMatch();
         reload();
@@ -108,6 +112,7 @@ void Library::setFolders(const QStringList &folders)
         return;
     m_folders = folders;
     settings().setValue("library/folders", m_folders);
+    m_catalog->setFolder(m_folders.value(0));
     emit foldersChanged();
     rescan();
 }
@@ -227,7 +232,7 @@ void Library::reload()
         // may be another edition's); the web's description and publishing
         // details come before the book's (often missing or thin)
         const QStringList named{"user", "book", "online", "file"};
-        const QStringList described{"user", "online", "book"};
+        const QStringList described{"user", "online", "book", "catalog"};
         const auto [title, titleFrom] = pick("title", q.value(2).toString(), named);
         const auto [authors, authorsFrom] = pick("authors", q.value(3).toString(), named);
         const auto [cover, coverFrom] = pick("cover", q.value(12).toString(), {"user", "book", "online"});

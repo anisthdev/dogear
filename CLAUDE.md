@@ -10,8 +10,8 @@ An ebook reader and library, like Foliate but ours. App ID `io.github.anisthdev.
 4. **Search** (done): in the book (`/`, panel + n/N), across every book's text (Ctrl+f, FTS5).
 5. **Metadata online** (done): Open Library (Google Books with a key); ISBN matches by themselves, the rest by `F`/`f` with a picker; hand edits win.
 6. **Dictionary** (done): StarDict through sdcv, then Wiktionary (`d`). No text-to-speech: the user decided Dogear won't have it.
-7. **OPDS** catalogues (foliate-js `opds.js`).
-8. **PDF** later, through pdf.js (left out of `reader/foliate/vendor` until then).
+7. **OPDS** (done): public catalogues, browsed in `O`; free EPUBs download into the library. No logins yet, no facets.
+8. **PDF** later, through pdf.js (left out of `reader/foliate/vendor` until then). Internet Archive (`https://archive.org/services/opds`) offers only PDFs as open access, so it joins the suggested catalogues then.
 
 ## How it runs
 
@@ -31,6 +31,7 @@ src/Library.*          QML singleton: the books QML sees, folders, watching, ope
 src/Database.*         the SQLite file ($XDG_DATA_HOME/dogear/library.db), its schema (user_version), cover thumbnails
 src/Scanner.*          library scan on its own thread; record() hashes, reads and upserts one file
 src/Online.*           Open Library / Google Books: ISBN lookups, searches, applying a match (book_fields 'online', tags, cover)
+src/Catalog.*          OPDS: feeds (Atom and JSON) in one shape for QML, search, the catalogues, downloads
 src/Dictionary.*       word lookups: sdcv (StarDict) first, then Wiktionary's REST definitions
 src/Epub.*             what an EPUB says (OPF metadata, series, cover) and its sections' text with chapter labels (nav/NCX), read from the zip with libzip
 src/SchemeHandler.*    dogear://app/...: reader page from :/reader, qwebchannel.js, books as /book/<id>
@@ -40,7 +41,7 @@ qml/Main.qml           the window, overlays, every key binding (handleKey)
 qml/Theme.qml          singleton: app palette (matugen or Material baseline), fonts, motion
 qml/ReadingTheme.qml   singleton: page colours and type, settings in $XDG_CONFIG_HOME/dogear/dogear.conf
 qml/KeyEvents.qml      singleton: the page's key events as Qt-style ones
-qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel, SearchPanel (both searches), BookPanel (i: details), MatchPanel (f/F: online match)
+qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel, SearchPanel (both searches), BookPanel (i: details), MatchPanel (f/F: online match), CatalogView (O: catalogues and feeds), CatalogBook (a catalogue's book)
 qml/components/        Cover (rounded, placeholder card); Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
 reader/index.html, reader.js   the page: foliate-js driven over the web channel
 reader/foliate/        foliate-js, vendored (commit in VERSION, MIT); don't edit, update whole
@@ -84,7 +85,7 @@ Every QML file imports `Dogear` (its own module) rather than relative paths. Sin
 
 ## Book details and online metadata
 
-- Sources, kept apart (schema v6): the EPUB's own columns on `books` ('book'); `book_fields` (book, field, source, value) for 'user' (typed in, `i` then t a p y I), 'online' and 'file' (the file name, only for books that don't say). `Library.reload` picks per field: title/authors user → book → online → file; description/publisher/published user → online → book; cover user → book → online; each book carries `…From` for the sheet. Nothing overwrites another source; `setField(id, f, "")` drops the user's.
+- Sources, kept apart (schema v6): the EPUB's own columns on `books` ('book'); `book_fields` (book, field, source, value) for 'user' (typed in, `i` then t a p y I), 'online' and 'file' (the file name, only for books that don't say). `Library.reload` picks per field: title/authors user → book → online → file; description/publisher/published user → online → book → catalog; cover user → book → online; each book carries `…From` for the sheet. Nothing overwrites another source; `setField(id, f, "")` drops the user's.
 - `Online` (one request at a time, 350 ms apart, User-Agent naming Dogear): after each scan, books with an ISBN not yet tried get `/isbn/{isbn}.json` (an edition: its publisher, date, ISBN) + its author + its work (description, subjects); books without one are marked 'none' for the review. `online_status`: pending isbn picked none skipped error; a new ISBN from a rescan of an unmatched book clears `online_checked`, so it's tried again.
 - By hand: `f` in the details, or `F` in the library for every unmatched, unskipped book in turn (Esc next, x never ask, q stop). `/search.json?q=` (every word must match: the field starts as title less any subtitle + first author's surname, and a search finding nothing retries with the last word dropped, up to 3 times). A search gives a *work*: its publishers and ISBNs are every edition's, so only work-level fields are kept (title, authors, description, first year, cover, tags).
 - Google Books only with `[metadata] googleKey` (its keyless quota is shared and spent); `[metadata] online=false` turns lookups off.
@@ -98,6 +99,16 @@ Every QML file imports `Dogear` (its own module) rather than relative paths. Sin
 - `Dictionary::forms`: the selection less surrounding punctuation, lower case, then plural/tense endings stripped (ies→y, es, s, doubled consonant + ed/ing, ed, ing, 's); each form is tried, offline then online.
 - Offline: `sdcv -n -j -e -0 -1 -2 <$XDG_DATA_HOME/dogear/dictionaries> word` (it also reads ~/.stardict/dic, /usr/share/stardict/dic, $STARDICT_DATA_DIR); each dictionary's answer is one entry, senses split on blank lines. Install StarDict files (.ifo/.idx/.dict[.dz]) in any of those folders.
 - Online: `en.wiktionary.org/api/rest_v1/page/definition/{word}`, the section for the book's language (else English), up to six senses per part of speech, HTML made plain. `[dictionary] online=false` turns it off.
+
+## Catalogues
+
+- `O` in the library: `win.mode` "catalog". `Library.catalog` (Catalog) has the kept catalogues, `catalogs` table (schema v8, public ones seeded once, so one removed stays gone); `a r x` in the list add (after the address loads as a feed), rename, remove.
+- Feeds are parsed in C++, not by foliate's `opds.js`: that needs a DOM, and the library has no page. Both formats become { title, next, search, web, items }, items being heading, nav or book rows (top comment in Catalog.h). Every URL goes through `absolute`: http(s) only (`data:image/` for images), so a feed can't reach local files. Text shows as `Text.PlainText`, so a feed can't load remote images through its HTML.
+- Real feeds bend the spec: Gutenberg's book page has one entry per edition (`mergeEditions`, by title and authors, formats sorted by `rank`) and a page of "Label: value" lines as content (`prose` keeps the Summary); ManyBooks' search results call their feeds text/html (a link with no rel counts as the way in) and it wraps titles in XHTML (`richText`). ManyBooks refuses covers to Qt's default User-Agent, hence `NetworkFactory` in main.cpp.
+- A feed that's one book opens as the sheet (CatalogBook), with no new page. `CatalogView.pages` is the way here, kept in memory; going back doesn't refetch. The list's model is only indexes (`i`, into `rows`), so the next page (`moreIfNear`, 6 rows from the end) appends without rebuilding the rows.
+- Search: `/` uses the nearest page's `search`, a template or an OpenSearch description (fetched for its feed template); `fillTemplate` handles `{searchTerms}`, `{?query}` and optional slots.
+- Downloads: free EPUBs only (`acquisition`, `acquisition/open-access`; buy, borrow, subscribe and sample aren't offered). Written through QSaveFile into the first library folder, so the unfinished file doesn't end in .epub; the first bytes must be a zip's; hashed as they arrive, so the book's id is known without reading the file again. If that book is already there the file is dropped. `catalog_books` maps a feed's book id to ours (`held`), which is how rows know "✓ In library". The catalogue's description and publisher go in `book_fields` as 'catalog', after the book's own.
+- Standard Ebooks' OPDS needs a login (401) and Feedbooks refuses non-browsers (403), so neither is suggested.
 
 ## The reader page
 

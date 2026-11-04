@@ -105,7 +105,8 @@ bool migrate(QSqlDatabase &db)
     if (version < 6) {
         // A book's details from elsewhere than its EPUB, by source:
         // 'online' (Open Library, Google Books), 'user' (typed in), 'file'
-        // (guessed from the file's name). Library picks what shows.
+        // (guessed from the file's name), 'catalog' (the OPDS catalogue it
+        // was downloaded from). Library picks what shows.
         if (!q.exec(R"(CREATE TABLE book_fields (
                 book TEXT NOT NULL,
                 field TEXT NOT NULL,    -- title authors description publisher published isbn cover
@@ -129,6 +130,28 @@ bool migrate(QSqlDatabase &db)
         if (!q.exec("ALTER TABLE books ADD COLUMN user_category TEXT"))
             return false;
         q.exec("PRAGMA user_version = 7");
+    }
+    if (version < 8) {
+        // OPDS catalogues, and which of a catalogue's books were downloaded
+        // as which of ours. Public ones to start with; one removed stays so.
+        if (!q.exec(R"(CREATE TABLE catalogs (
+                url TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0
+            ))"))
+            return false;
+        if (!q.exec(R"(CREATE TABLE catalog_books (
+                entry TEXT PRIMARY KEY,
+                book TEXT NOT NULL
+            ))"))
+            return false;
+        if (!q.exec(R"(INSERT INTO catalogs (url, title, position) VALUES
+                ('https://m.gutenberg.org/ebooks.opds/', 'Project Gutenberg', 1),
+                ('https://manybooks.net/opds/', 'ManyBooks', 2),
+                ('https://unglue.it/api/opds/', 'Unglue.it', 3),
+                ('https://ws-export.wmcloud.org/opds/en/Ready_for_export.xml', 'Wikisource', 4))"))
+            return false;
+        q.exec("PRAGMA user_version = 8");
     }
     return true;
 }

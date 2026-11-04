@@ -20,7 +20,7 @@ Window {
     title: mode === "reader" && reader.title ? `${reader.title} — Dogear` : "Dogear"
     color: mode === "reader" ? ReadingTheme.background : Theme.surface
 
-    // "library" or "reader"
+    // "library", "catalog" or "reader"
     property string mode: "library"
 
     Behavior on color {
@@ -49,12 +49,27 @@ Window {
         ["T", "Tags of the selection or this book"],
         ["Esc", "Let go: selection, filter, tag, series"],
         ["a", "Add books (copied into the library folder)"],
+        ["O", "Online catalogues"],
         ["R", "Look for new books"],
         ["Ctrl+f", "Search the text of every book"],
         ["i", "Details (f there: find it online)"],
         ["F", "Match books not found online yet, one by one"],
         ["?  F1", "These keys"],
         ["q  Ctrl+w", "Quit"]
+    ]
+
+    readonly property var catalogBindings: [
+        ["j k  gg  G", "Move"],
+        ["Ctrl+d  Ctrl+u", "Half a page down, up"],
+        ["Enter  l", "Open"],
+        ["h  q  Esc", "Back"],
+        ["/", "Search the catalogue"],
+        ["d", "Download this book"],
+        ["o", "In the browser"],
+        ["a  r  x", "List of catalogues: add, rename, remove"],
+        ["Tab", "A book: choose its EPUB"],
+        ["x", "A book: cancel its download"],
+        ["?", "This list"]
     ]
 
     readonly property var bindings: [
@@ -173,7 +188,14 @@ Window {
             help.open = true;
             return true;
         }
+        if (mode === "catalog")
+            return catalog.handleKey(e);
         if (mode === "library") {
+            if (t === "O") {
+                catalog.show();
+                mode = "catalog";
+                return true;
+            }
             if (t === "i" && library.current) {
                 const c = library.current;
                 bookPanel.show(c.isSeries ? c.next.id : c.id);
@@ -399,6 +421,18 @@ Window {
         dialog: inputDialog
         confirm: confirmDialog
         tagPanel: tagPanel
+    }
+
+    CatalogView {
+        id: catalog
+
+        anchors.fill: parent
+        visible: win.mode === "catalog"
+        dialog: inputDialog
+        confirm: confirmDialog
+        onLeave: win.mode = "library"
+        onOpenBook: path => win.openBook(path)
+        onToast: message => win.toast(message)
     }
 
     function define() {
@@ -682,7 +716,7 @@ Window {
     KeyHelp {
         id: help
 
-        bindings: win.mode === "library" ? win.libraryBindings : win.bindings
+        bindings: win.mode === "library" ? win.libraryBindings : win.mode === "catalog" ? win.catalogBindings : win.bindings
         onOpenChanged: if (!open && reader.hasBook && win.mode === "reader")
             reader.focusPage()
     }

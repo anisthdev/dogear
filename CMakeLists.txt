@@ -25,6 +25,7 @@ qt_add_qml_module(dogear
         src/Scanner.h src/Scanner.cpp
         src/Online.h src/Online.cpp
         src/Dictionary.h src/Dictionary.cpp
+        src/Catalog.h src/Catalog.cpp
         src/TextFile.h src/TextFile.cpp
         src/SchemeHandler.h src/SchemeHandler.cpp
         src/WindowWatch.h src/WindowWatch.cpp
@@ -43,6 +44,8 @@ qt_add_qml_module(dogear
         qml/views/BookPanel.qml
         qml/views/MatchPanel.qml
         qml/views/DefinitionCard.qml
+        qml/views/CatalogView.qml
+        qml/views/CatalogBook.qml
         qml/components/InputDialog.qml
         qml/components/ConfirmDialog.qml
         qml/components/TextButton.qml

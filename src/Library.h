@@ -9,6 +9,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include "Catalog.h"
+
 class Dictionary;
 class Online;
 class Scanner;
@@ -38,6 +40,8 @@ class Library : public QObject
     // if set, else the EPUB's, else the folder's.
     Q_PROPERTY(QVariantList books READ books NOTIFY booksChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
+    // OPDS catalogues
+    Q_PROPERTY(Catalog *catalog READ catalog CONSTANT)
 
 public:
     explicit Library(QObject *parent = nullptr);
@@ -50,6 +54,7 @@ public:
     void setFolders(const QStringList &folders);
     QVariantList books() const { return m_books; }
     bool scanning() const { return m_scanning; }
+    Catalog *catalog() const { return m_catalog; }
 
     // The file served as dogear://app/book/<id>; empty if not opened
     static QString fileFor(const QString &id);
@@ -135,6 +140,7 @@ private:
     Scanner *m_scanner = nullptr;
     Online *m_online = nullptr;
     Dictionary *m_dictionary = nullptr;
+    Catalog *m_catalog = nullptr;
     QFileSystemWatcher m_watcher;
     QTimer m_rescanTimer;
     static QString s_startFile;
