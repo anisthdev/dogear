@@ -11,7 +11,8 @@ conflicts=('dogear')
 license=('unknown')
 depends=('qt6-base' 'qt6-declarative' 'qt6-webengine' 'qt6-webchannel' 'libzip')
 makedepends=('git' 'cmake' 'ninja')
-optdepends=('matugen: page and app colours from the wallpaper (~/.config/dogear/colors.css)')
+optdepends=('matugen: page and app colours from the wallpaper (~/.config/dogear/colors.css)'
+            'sdcv: offline dictionaries (StarDict)')
 source=("git+$url.git")
 sha256sums=('SKIP')
 
@@ -27,4 +28,6 @@ build() {
 
 package() {
     DESTDIR="$pkgdir" cmake --install build
+    # foliate-js is compiled into the binary
+    install -Dm644 "$_name/reader/foliate/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/foliate-js"
 }
