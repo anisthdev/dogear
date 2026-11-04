@@ -286,6 +286,14 @@ Item {
                 Library.saveProgress(root.bookId, w.cfi, w.fraction ?? 0);
         }
 
+        function turnAsked(json) {
+            curl.ask(JSON.parse(json));
+        }
+
+        function turnReady(json) {
+            curl.turned(JSON.parse(json).moved);
+        }
+
         function key(json) {
             root.keyPressed(KeyEvents.fromWeb(JSON.parse(json)));
         }
@@ -343,6 +351,7 @@ Item {
     Item {
         id: header
 
+        z: 2
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -433,9 +442,22 @@ Item {
         }
     }
 
+    // Over the page and under the bars, a whole window's worth of paper
+    PageCurl {
+        id: curl
+
+        z: 1
+        anchors.fill: parent
+        page: web
+        paper: ReadingTheme.background
+        dark: ReadingTheme.dark
+        onTurn: how => root.send("turnNow", how)
+    }
+
     Item {
         id: footer
 
+        z: 2
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right

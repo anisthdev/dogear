@@ -63,7 +63,10 @@ QtObject {
         property bool hyphenate: true
         // "paginated" or "scrolled"
         property string flow: "paginated"
-        // Pages slide when turned (foliate's own 300 ms ease-out)
+        // How pages turn: "curl" (like paper, PageCurl.qml), "slide"
+        // (foliate's own 300 ms ease-out) or "none"
+        property string pageTurn: "curl"
+        // Older settings' way of saying "none"
         property bool animatePages: true
         // A column's widest, in px; two columns side by side when there's room
         property int maxWidth: 720
@@ -122,7 +125,7 @@ QtObject {
             justify: settings.justify,
             hyphenate: settings.hyphenate,
             flow: settings.flow,
-            animatePages: settings.animatePages,
+            pageTurn: settings.animatePages ? settings.pageTurn : "none",
             maxWidth: settings.maxWidth,
             columns: settings.columns,
             images: settings.images === "invert" ? "invert" : "dim",

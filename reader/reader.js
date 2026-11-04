@@ -233,7 +233,7 @@ function applyStyle() {
     set('gap', '6%')
     set('margin', '32px')
     // foliate slides pages within a section when `animated` is present
-    if (style.animatePages) set('animated', '')
+    if (style.pageTurn === 'slide') set('animated', '')
     else r.removeAttribute('animated')
     r.setStyles?.(bookCSS(style))
     Scroller.hideScrollbar()
@@ -659,8 +659,8 @@ function turnFromClick(e, doc) {
     // The frame's coordinates are its own; map them to the view's
     const frame = doc.defaultView?.frameElement
     const left = frame ? frame.getBoundingClientRect().left + x : x
-    if (left < width / 3) view.goLeft()
-    else if (left > width * 2 / 3) view.goRight()
+    if (left < width / 3) turn('left')
+    else if (left > width * 2 / 3) turn('right')
 }
 
 let wheelAt = 0
@@ -678,9 +678,74 @@ function onWheel(e) {
     const now = Date.now()
     if (now - wheelAt < 250 || Math.abs(e.deltaY) < 4) return
     wheelAt = now
-    if (e.deltaY > 0) view.next()
-    else view.prev()
+    turn(e.deltaY > 0 ? 'next' : 'prev')
 }
+
+// Turning a page. With the curl QML has to photograph the page first
+// (PageCurl.qml), so it's asked, and says when: `turnNow`. `turnReady`
+// goes back once the new page is laid out.
+const turns = {
+    next: () => view.next(),
+    prev: () => view.prev(),
+    left: () => view.goLeft(),
+    right: () => view.goRight(),
+}
+
+const turnsForward = how => how === 'next'
+    || how === (view.book.dir === 'rtl' ? 'left' : 'right')
+
+function turn(how) {
+    if (!view) return
+    const r = view.renderer
+    if (style?.pageTurn !== 'curl' || r.scrolled) return turns[how]()
+    const forward = turnsForward(how)
+    if (forward ? r.atEnd : r.atStart) return
+    send('turnAsked', {
+        how, forward,
+        rtl: view.book.dir === 'rtl',
+        spread: columnsShown() > 1,
+    })
+}
+
+// How many columns the paginator fitted on the screen. It keeps the number
+// to itself, but laid the section out with it.
+function columnsShown() {
+    const r = view.renderer
+    const doc = r.getContents()[0]?.doc
+    if (!doc) return 1
+    const css = doc.defaultView.getComputedStyle(doc.documentElement)
+    const column = parseFloat(css.columnWidth) + parseFloat(css.columnGap)
+    return column > 0 ? Math.round(r.size / column) : 1
+}
+
+async function turnNow(how) {
+    const r = view.renderer
+    // Leaving the section: foliate moves to its blank end page, which is a
+    // `relocate` of its own, and only then loads the next
+    const leaving = turnsForward(how) ? r.page >= r.pages - 2 : r.page <= 1
+    let moved = false
+    const relocated = new Promise(resolve =>
+        view.addEventListener('relocate', () => (moved = true, resolve()), { once: true }))
+    // Otherwise not the whole turn: foliate holds its lock 100 ms longer
+    await (leaving ? turns[how]() : Promise.race([relocated, turns[how]()]))
+    if (leaving) await painted(r.getContents()[0].doc)
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    send('turnReady', { moved })
+}
+
+// A new section is laid out well before it's on the screen, and a picture
+// taken then is blank. Chromium says when its first text or image has been
+// drawn; a page with neither never gets that, so don't wait long.
+const painted = doc => new Promise(resolve => {
+    const timeout = setTimeout(resolve, 400)
+    new doc.defaultView.PerformanceObserver((list, observer) => {
+        if (!list.getEntriesByName('first-contentful-paint').length) return
+        observer.disconnect()
+        clearTimeout(timeout)
+        resolve()
+    }).observe({ type: 'paint', buffered: true })
+})
 
 // Done when the book is open and laid out (search waits for it)
 let opening = Promise.resolve()
@@ -761,16 +826,17 @@ async function openBook({ url, position, annotations }) {
 const commands = {
     open,
     style: s => { style = s; applyStyle() },
-    next: () => view?.next(),
-    prev: () => view?.prev(),
+    next: () => turn('next'),
+    prev: () => turn('prev'),
     // j/k and the arrows: a page when paginated, a few lines when scrolling
-    down: () => style?.flow === 'scrolled' ? Scroller.lines(1) : view?.next(),
-    up: () => style?.flow === 'scrolled' ? Scroller.lines(-1) : view?.prev(),
+    down: () => style?.flow === 'scrolled' ? Scroller.lines(1) : turn('next'),
+    up: () => style?.flow === 'scrolled' ? Scroller.lines(-1) : turn('prev'),
     // Space, Page Down/Up: a page, or most of a screen when scrolling
-    pageDown: () => style?.flow === 'scrolled' ? Scroller.pages(1) : view?.next(),
-    pageUp: () => style?.flow === 'scrolled' ? Scroller.pages(-1) : view?.prev(),
-    left: () => view?.goLeft(),
-    right: () => view?.goRight(),
+    pageDown: () => style?.flow === 'scrolled' ? Scroller.pages(1) : turn('next'),
+    pageUp: () => style?.flow === 'scrolled' ? Scroller.pages(-1) : turn('prev'),
+    left: () => turn('left'),
+    right: () => turn('right'),
+    turnNow,
     nextSection: () => view?.renderer.nextSection?.(),
     prevSection: () => view?.renderer.prevSection?.(),
     goTo: target => view?.goTo(target),

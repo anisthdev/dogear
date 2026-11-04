@@ -10,7 +10,7 @@ provides=('dogear')
 conflicts=('dogear')
 license=('unknown')
 depends=('qt6-base' 'qt6-declarative' 'qt6-webengine' 'qt6-webchannel' 'libzip')
-makedepends=('git' 'cmake' 'ninja')
+makedepends=('git' 'cmake' 'ninja' 'qt6-shadertools')
 optdepends=('matugen: page and app colours from the wallpaper (~/.config/dogear/colors.css)'
             'sdcv: offline dictionaries (StarDict)')
 source=("git+$url.git")

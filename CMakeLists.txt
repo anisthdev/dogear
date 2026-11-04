@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBZIP REQUIRED IMPORTED_TARGET libzip)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick Sql WebEngineQuick WebChannel)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick ShaderTools Sql WebEngineQuick WebChannel)
 qt_standard_project_setup(REQUIRES 6.5)
 
 qt_add_executable(dogear src/main.cpp)
@@ -35,6 +35,7 @@ qt_add_qml_module(dogear
         qml/ReadingTheme.qml
         qml/KeyEvents.qml
         qml/views/Reader.qml
+        qml/views/PageCurl.qml
         qml/views/TocPanel.qml
         qml/views/FontPanel.qml
         qml/views/TagPanel.qml
@@ -62,6 +63,8 @@ qt_add_qml_module(dogear
 file(GLOB_RECURSE READER_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS reader/*.html reader/*.js reader/*.css)
 qt_add_resources(dogear reader PREFIX / FILES ${READER_FILES})
+
+qt_add_shaders(dogear "shaders" PREFIX / FILES shaders/pagecurl.frag)
 
 target_include_directories(dogear PRIVATE src)
 target_compile_definitions(dogear PRIVATE DOGEAR_VERSION="${PROJECT_VERSION}")
