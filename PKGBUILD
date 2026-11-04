@@ -8,7 +8,7 @@ arch=('x86_64')
 url="https://github.com/anisthdev/dogear"
 provides=('dogear')
 conflicts=('dogear')
-license=('unknown')
+license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-webengine' 'qt6-webchannel' 'libzip')
 makedepends=('git' 'cmake' 'ninja' 'qt6-shadertools')
 optdepends=('matugen: page and app colours from the wallpaper (~/.config/dogear/colors.css)'
@@ -28,6 +28,7 @@ build() {
 
 package() {
     DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "$_name/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     # foliate-js and what it vendors are compiled into the binary
     install -Dm644 "$_name/reader/foliate/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/foliate-js"
     install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" "$_name/licenses/zip.js" "$_name/licenses/fflate"
