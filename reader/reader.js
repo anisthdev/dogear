@@ -800,6 +800,7 @@ async function openBook({ url, position, annotations }) {
         ...(view.renderer.scrolled ? {} : {
             sectionPage: view.renderer.page,
             sectionPages: Math.max(1, view.renderer.pages - 2),
+            spread: columnsShown() > 1,
         }),
         minutesLeftInSection: detail.time?.section,
         minutesLeft: detail.time?.total,

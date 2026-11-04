@@ -101,7 +101,7 @@ Item {
 
         width: Math.min(440, root.width - 24)
         height: Math.min(Math.max(120, content.implicitHeight + 80), root.height * 0.55)
-        x: Math.max(12, Math.min(root.width - width - 12, r.x + r.width / 2 - width / 2))
+        x: Math.max(12, Math.min(root.width - width - 12, (root.reader ? root.reader.pageX : 0) + r.x + r.width / 2 - width / 2))
         // Under the word if it fits, else over it
         y: below + height <= root.height - 12 ? below : Math.max(12, above)
         radius: Theme.cardRadius

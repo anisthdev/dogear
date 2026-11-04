@@ -12,13 +12,14 @@ QtObject {
 
     // Auto follows the app's palette (the wallpaper's, through matugen,
     // else the system's light or dark); the others are fixed papers
-    readonly property var schemes: ["auto", "light", "sepia", "dark", "black"]
+    readonly property var schemes: ["auto", "light", "sepia", "dark", "black", "book"]
     readonly property var schemeNames: ({
             auto: "Auto",
             light: "Light",
             sepia: "Sepia",
             dark: "Dark",
-            black: "Black"
+            black: "Black",
+            book: "Book"
         })
     readonly property var papers: ({
             light: {
@@ -46,6 +47,13 @@ QtObject {
                 fg: "#bdbbb6",
                 link: "#7fa7e6",
                 dark: true
+            },
+            // Matte cream; Reader lays the rest of the book around it
+            book: {
+                bg: "#f7ecd6",
+                fg: "#2c2620",
+                link: "#7a3b1d",
+                dark: false
             }
         })
 
@@ -56,6 +64,8 @@ QtObject {
         category: "reading"
 
         property string scheme: "auto"
+        // What toggleBook goes back to
+        property string beforeBook: "auto"
         // Percent of the book's own sizes
         property int fontScale: 100
         property real lineHeight: 1.5
@@ -93,12 +103,33 @@ QtObject {
     readonly property color foreground: isAuto ? Theme.on_surface : papers[scheme].fg
     readonly property color link: isAuto ? Theme.primary : papers[scheme].link
     readonly property bool dark: isAuto ? Theme.dark : papers[scheme].dark
-    // For the bars around the page: the text, quieter
-    readonly property color muted: Qt.alpha(foreground, 0.6)
+    // A book lying open on the desktop, only where there are pages to turn
+    readonly property bool bookLook: scheme === "book" && settings.flow === "paginated"
+    // The window around the page
+    readonly property color surround: bookLook ? "transparent" : background
+    // For the bars around the page: on a dark plate or on the paper
+    readonly property color bars: bookLook ? "#d8ccba" : foreground
+    readonly property color muted: Qt.alpha(bars, 0.6)
 
+    // c and C go through the colours; the book has its own key. From the
+    // book they carry on from the colours it left.
     function cycleScheme(by) {
-        const i = schemes.indexOf(scheme);
-        settings.scheme = schemes[(i + by + schemes.length) % schemes.length];
+        const plain = schemes.filter(s => s !== "book");
+        const i = plain.indexOf(scheme === "book" ? settings.beforeBook : scheme);
+        settings.scheme = plain[(i + by + plain.length) % plain.length];
+    }
+
+    // Into the book, in pages since it has no other form, and out to the
+    // colours it left
+    function toggleBook() {
+        if (bookLook) {
+            settings.scheme = schemes.includes(settings.beforeBook) && settings.beforeBook !== "book" ? settings.beforeBook : "auto";
+            return;
+        }
+        if (scheme !== "book")
+            settings.beforeBook = scheme;
+        settings.scheme = "book";
+        settings.flow = "paginated";
     }
 
     function toggleImages() {

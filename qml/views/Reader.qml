@@ -32,7 +32,22 @@ Item {
     // Visual mode is on (the page has its keys)
     property bool visual: false
     // Where the page sits in this item, for placing the menu
+    readonly property real pageX: web.x
     readonly property real pageY: web.y
+
+    // The Book scheme: the page is a book's, alone on the desktop. Its
+    // proportions hold on a wide window, room is kept for the boards and
+    // page edges and the shadow,
+    // and two pages show where the paginator will lay out two columns.
+    readonly property bool bookLook: ReadingTheme.bookLook
+    readonly property real roomWidth: width - 140
+    readonly property real roomHeight: height - header.height - footer.height
+    readonly property bool twoPages: roomWidth >= roomHeight && roomWidth > ReadingTheme.settings.maxWidth && ReadingTheme.settings.columns > 1
+    readonly property real pageSide: bookLook ? (width - Math.min(roomWidth, roomHeight * (twoPages ? 1.56 : 0.78))) / 2 : 0
+    readonly property bool rtl: details?.dir === "rtl"
+    readonly property color barPlate: "#d91c1815"
+    // The cover's colour, for the boards
+    readonly property color boardColor: Library.coverTint(bookId)
 
     // A selection was made or a highlight clicked; `defined` when visual
     // mode's d asked for the dictionary instead of the menu
@@ -361,7 +376,20 @@ Item {
             id: headerHover
         }
 
+        // With no paper behind them, the bars bring their own
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(title.implicitWidth, parent.width - 96) + 28
+            height: 26
+            radius: 13
+            color: root.barPlate
+            visible: root.bookLook
+            opacity: title.opacity
+        }
+
         Label {
+            id: title
+
             anchors.centerIn: parent
             width: Math.min(implicitWidth, parent.width - 96)
             horizontalAlignment: Text.AlignHCenter
@@ -384,6 +412,8 @@ Item {
         z: 2
         anchors.left: parent.left
         anchors.leftMargin: 40
+        // In a book, a bookmark is a dog-ear
+        opacity: root.bookLook ? 0 : 1
         y: root.where?.bookmark ? 0 : -height
         width: 16
         height: 30
@@ -400,10 +430,27 @@ Item {
         }
     }
 
+    ShaderEffect {
+        anchors.fill: parent
+        visible: root.bookLook
+
+        property real spread: root.where?.spread ? 1 : 0
+        property real mirror: root.rtl ? 1 : 0
+        property real fraction: root.where?.fraction ?? 0
+        property size area: Qt.size(width, height)
+        property rect pageRect: Qt.rect(web.x, web.y, web.width, web.height)
+        property color board: root.boardColor
+        property color paper: ReadingTheme.background
+
+        fragmentShader: "qrc:/shaders/bookcase.frag.qsb"
+    }
+
     WebEngineView {
         id: web
 
         anchors.fill: parent
+        anchors.leftMargin: root.pageSide
+        anchors.rightMargin: root.pageSide
         anchors.topMargin: header.height
         anchors.bottomMargin: footer.height
         url: "dogear://app/index.html"
@@ -451,7 +498,36 @@ Item {
         page: web
         paper: ReadingTheme.background
         dark: ReadingTheme.dark
+        sheetRect: root.bookLook ? Qt.rect(web.x, web.y, web.width, web.height) : Qt.rect(0, 0, width, height)
         onTurn: how => root.send("turnNow", how)
+    }
+
+    // The paper's look, over the page and the sheet alike
+    ShaderEffect {
+        x: web.x
+        y: web.y
+        z: 1.5
+        width: web.width
+        height: web.height
+        visible: root.bookLook
+
+        property real spread: root.where?.spread ? 1 : 0
+        property real mirror: root.rtl ? 1 : 0
+        // Folds once the page has settled
+        property real dogear: root.where?.bookmark && curl.phase === "idle" ? 1 : 0
+        property size area: Qt.size(width, height)
+        property color paper: ReadingTheme.background
+        property color board: root.boardColor
+
+        fragmentShader: "qrc:/shaders/bookpage.frag.qsb"
+
+        Behavior on dogear {
+            NumberAnimation {
+                duration: Theme.animNormal
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Theme.emphasizedDecel
+            }
+        }
     }
 
     Item {
@@ -474,6 +550,16 @@ Item {
 
             anchors.fill: parent
             opacity: footerHover.hovered ? 1 : 0
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                anchors.bottomMargin: 2
+                radius: 12
+                color: root.barPlate
+                visible: root.bookLook
+            }
 
             Behavior on opacity {
                 NumberAnimation {
@@ -535,8 +621,8 @@ Item {
                 visible: root.hasBook
                 thickness: 4
                 progress: footer.fraction
-                color: ReadingTheme.isAuto ? Theme.primary : Qt.alpha(ReadingTheme.foreground, 0.55)
-                trackColor: ReadingTheme.isAuto ? Theme.secondary_container : Qt.alpha(ReadingTheme.foreground, 0.12)
+                color: ReadingTheme.isAuto ? Theme.primary : Qt.alpha(ReadingTheme.bars, 0.55)
+                trackColor: ReadingTheme.isAuto ? Theme.secondary_container : Qt.alpha(ReadingTheme.bars, 0.12)
             }
         }
     }

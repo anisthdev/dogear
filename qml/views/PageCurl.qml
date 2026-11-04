@@ -19,6 +19,8 @@ Item {
 
     required property Item page
     required property color paper
+    // Where the paper is; the rest of this item shows what's beneath
+    property rect sheetRect: Qt.rect(0, 0, width, height)
     property bool dark: false
 
     // The picture's taken: turn the page, then call turned()
@@ -169,6 +171,7 @@ Item {
         property real dark: root.dark ? 1 : 0
         property size area: Qt.size(width, height)
         property rect pageRect: Qt.rect(root.page.x, root.page.y, root.page.width, root.page.height)
+        property rect bookRect: root.sheetRect
         property color paper: root.paper
 
         fragmentShader: "qrc:/shaders/pagecurl.frag.qsb"

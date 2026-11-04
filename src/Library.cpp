@@ -8,6 +8,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QHash>
+#include <QImage>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSqlError>
@@ -307,6 +308,31 @@ QVariantMap Library::open(const QString &pathOrUrl)
         {"position", found ? q.value(0).toString() : QString()},
         {"fraction", found ? q.value(1).toDouble() : 0.0},
     };
+}
+
+QColor Library::coverTint(const QString &id) const
+{
+    QImage cover(Database::coverPath(id));
+    if (cover.isNull())
+        cover.load(QString(Database::coverPath(id)).replace(".jpg", "-online.jpg"));
+    if (cover.isNull())
+        return QColor("#6b2d28");
+
+    // Vivid pixels count most, so a red title on a white jacket reads as red
+    cover = cover.scaled(24, 32).convertToFormat(QImage::Format_RGB32);
+    double r = 0, g = 0, b = 0, weight = 0;
+    for (int y = 0; y < cover.height(); y++) {
+        for (int x = 0; x < cover.width(); x++) {
+            const QColor c = cover.pixelColor(x, y);
+            const double w = 0.02 + c.hsvSaturationF() * c.hsvSaturationF() * c.valueF();
+            r += c.redF() * w;
+            g += c.greenF() * w;
+            b += c.blueF() * w;
+            weight += w;
+        }
+    }
+    const QColor mean = QColor::fromRgbF(r / weight, g / weight, b / weight);
+    return QColor::fromHslF(qMax(0.0f, mean.hslHueF()), qBound(0.28f, mean.hslSaturationF(), 0.62f), 0.25f);
 }
 
 QString Library::lastBook() const

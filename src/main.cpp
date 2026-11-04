@@ -47,6 +47,8 @@ int main(int argc, char *argv[])
     // Both must happen before the application exists
     SchemeHandler::registerScheme();
     QtWebEngineQuick::initialize();
+    // The Book scheme leaves all but the book see-through
+    QQuickWindow::setDefaultAlphaBuffer(true);
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("dogear");

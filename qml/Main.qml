@@ -18,7 +18,7 @@ Window {
     minimumHeight: 360
     visible: true
     title: mode === "reader" && reader.title ? `${reader.title} — Dogear` : "Dogear"
-    color: mode === "reader" ? ReadingTheme.background : Theme.surface
+    color: mode === "reader" ? ReadingTheme.surround : Theme.surface
 
     // "library", "catalog" or "reader"
     property string mode: "library"
@@ -81,6 +81,7 @@ Window {
         ["Ctrl+o  Ctrl+i", "Back, forward (after a jump)"],
         ["t", "Contents"],
         ["c  C", "Next, previous colours"],
+        ["b", "Book mode: a real book on the desktop"],
         ["+  -  0", "Larger, smaller, normal text"],
         ["F", "Font (/ filters)"],
         ["v", "Visual mode: select with h l w b e j k ( ) { } 0 $, y to finish, d to define"],
@@ -296,6 +297,10 @@ Window {
         case "0":
             ReadingTheme.zoom(0);
             toast("Text 100%");
+            return true;
+        case "b":
+            ReadingTheme.toggleBook();
+            toast(ReadingTheme.bookLook ? "Book" : `Colours: ${ReadingTheme.schemeNames[ReadingTheme.scheme]}`);
             return true;
         case "s":
             ReadingTheme.settings.flow = ReadingTheme.settings.flow === "paginated" ? "scrolled" : "paginated";

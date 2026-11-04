@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QFileSystemWatcher>
+#include <QColor>
 #include <QObject>
 #include <QQmlEngine>
 #include <QSqlDatabase>
@@ -64,6 +65,8 @@ public:
     Q_INVOKABLE QVariantMap open(const QString &pathOrUrl);
     // The most recently opened book's path that still exists, or ""
     Q_INVOKABLE QString lastBook() const;
+    // A book's cover as one colour dark enough for its boards
+    Q_INVOKABLE QColor coverTint(const QString &id) const;
     Q_INVOKABLE void saveProgress(const QString &id, const QString &position, double fraction);
     // Forget where one was in books: as if never opened (highlights and
     // bookmarks stay)

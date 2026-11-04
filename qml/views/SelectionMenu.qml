@@ -143,7 +143,7 @@ Item {
 
         width: row.implicitWidth + 24
         height: 56
-        x: Math.max(12, Math.min(root.width - width - 12, r.x + r.width / 2 - width / 2))
+        x: Math.max(12, Math.min(root.width - width - 12, (root.reader ? root.reader.pageX : 0) + r.x + r.width / 2 - width / 2))
         y: above >= 12 ? above : Math.min(root.height - height - 12, below)
         radius: Theme.cardRadius
         color: Qt.alpha(Theme.surface_container_high, 1)

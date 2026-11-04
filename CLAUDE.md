@@ -43,7 +43,7 @@ qml/ReadingTheme.qml   singleton: page colours and type, settings in $XDG_CONFIG
 qml/KeyEvents.qml      singleton: the page's key events as Qt-style ones
 qml/views/             LibraryView (grid/list, keys), Reader (web view + bars + bridge), PageCurl (the page-turn film), TocPanel, FontPanel, TagPanel, SelectionMenu, AnnotationsPanel, SearchPanel (both searches), BookPanel (i: details), MatchPanel (f/F: online match), CatalogView (O: catalogues and feeds), CatalogBook (a catalogue's book)
 qml/components/        Cover (rounded, placeholder card); Label, LinearProgress, ListKeys (Seedling), KeyHelp (margin)
-shaders/               fragment shaders, compiled by qsb at build time (qt6-shadertools); pagecurl.frag
+shaders/               fragment shaders, compiled by qsb at build time (qt6-shadertools): pagecurl (the turn), bookcase and bookpage (the Book scheme)
 reader/index.html, reader.js   the page: foliate-js driven over the web channel
 reader/foliate/        foliate-js, vendored (commit in VERSION, MIT); don't edit, update whole
 licenses/              the licences of foliate's vendored zip.js and fflate, which it doesn't carry; installed by the PKGBUILD. pdf.js (Apache) needs its own here in phase 8
@@ -133,7 +133,8 @@ Every QML file imports `Dogear` (its own module) rather than relative paths. Sin
 - The curl (`PageCurl.qml`, `shaders/pagecurl.frag`) is done from outside the page, which can't photograph itself: every turn in reader.js goes through `turn`, which asks QML (`turnAsked`); QML freezes the web view in a `ShaderEffectSource`, covers it with that picture and sends `turnNow`; the page turns at once underneath and answers `turnReady`; a second picture is taken and the shader rolls one off the other around a cylinder. Back is the same film reversed. In a spread the sheet is hinged in the middle and its back is the next left page; on one page the back is paper with the print showing through; right-to-left books mirror it. A turn asked for during a curl waits its turn and speeds the curl up 2.4×, so a held key doesn't skip.
   - The two `ShaderEffectSource`s must stay visible (one that isn't never takes its scheduled picture) yet never draw: they sit in a zero-size clipped `Item`. Loose, they draw over the page, `header.height` too high, and the last picture stays there after the curl (`z` only orders siblings, so `z: -1` doesn't put them behind the web view).
   - Leaving a section, foliate first scrolls to its blank end page, a `relocate` of its own, and loads the next section after. So `turnNow` works out `leaving` beforehand, awaits the whole turn then and the new document's `first-contentful-paint` (`painted`, 400 ms at most), or the second picture is blank.
-  - The picture covers the web view; the sheet is the whole window, plain paper outside the picture, passing under the bars (z 2).
+  - The picture covers the web view; the sheet is `sheetRect` (the whole window, plain paper outside the picture, or the Book scheme's page), passing under the bars (z 2). Outside it the shader leaves what's beneath, so in a spread the turning sheet hangs out past the book; with one page it goes out of sight at the spine.
+- The Book scheme (`b` toggles it, `toggleBook`, back to the colours it left, `beforeBook`; not in the `c` cycle; paginated only: `ReadingTheme.bookLook`; scrolling keeps its paper and nothing else) lays a book around the page without touching it. `Reader.pageSide` insets the web view to a book's proportions (a page 0.78 as wide as tall), the window around it transparent (`surround`; `setDefaultAlphaBuffer` in main.cpp), so anything placing itself over the page uses `pageX` as well as `pageY`. Under the web view, `bookcase.frag`: shadow, boards in the cover's colour (`Library.coverTint`), page edges that move from the right stack to the left with `fraction`. Over it and over the curl (z 1.5), `bookpage.frag`: shade only (fibres, crease, gutter shadows, the sheet's rise, the dip into the spine), premultiplied, so the page shows through and takes every click. A bookmark is a dog-ear there, folded once the curl is over, in place of the ribbon. `relocated.spread` says whether two columns are showing.
 - The page can restart (a reload, a renderer crash): it calls `ready` again and `Reader` resends the open book at `where.cfi`. Chromium's own context menu (back, reload, view source) is suppressed.
 
 ## Keyboard
@@ -150,10 +151,12 @@ Everything from the keyboard, vim style; mouse secondary (outer thirds of the pa
 Look like the shell's menus and margin; check `~/Projects/margin` and `~/Projects/seedling` before designing something new.
 
 - Colours: `Theme` properties named after Material roles, from `~/.config/dogear/colors.css` (matugen's `[templates.dogear]`), opaque (a normal window). Never hard-code hues in the app's chrome. The page's own schemes (`ReadingTheme.papers`: light, sepia, dark, black) are the exception; Auto uses `Theme.surface`/`on_surface`/`primary`.
-- The window and the bars around the page take the page's colours, so the whole window is one paper; overlays (contents, keys, snackbar) use `Theme`.
+- The window and the bars around the page take the page's colours (`ReadingTheme.surround`, `bars`), so the whole window is one paper, except in the Book scheme; overlays (contents, keys, snackbar) use `Theme`.
 - Type: `Label` (Google Sans Flex); panel titles 26px `Theme.titleWeight` in `primary`; rows 14px, sub-rows 13px `on_surface_variant`.
 - Motion: `Theme.emphasizedDecel`/`Accel`, `animFast`, `animNormal`.
 
 ## Testing
 
-Run it on the user's screen (`hyprctl dispatch "hl.dsp.exec_cmd('…')"` inside `systemd-inhibit --what=idle`), screenshot only its window, keys only to it (`hl.dsp.send_shortcut({ mods = "", key = "l", window = "class:io.github.anisthdev.Dogear" })`). `?` is `key = "slash", mods = "SHIFT"`. `q` closes the app. Stop it with `pkill -x dogear` (not `-f`, which matches the shell running it).
+Run it on the user's screen (`hyprctl dispatch "hl.dsp.exec_cmd('…')"` inside `systemd-inhibit --what=idle`), with `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` set to a scratch folder and a copy of a book, so the user's library and position stay as they were. Screenshot only its window, keys only to it (`hl.dsp.send_shortcut({ mods = "", key = "l", window = "address:0x…" })`). `?` is `key = "slash", mods = "SHIFT"`. `q` closes the app.
+
+The user's own Dogear may be running beside it, with the same class and process name. So find the test window's address by the pid you started (`hyprctl clients -j`), never select by `class:`, and stop it with `kill <pid>`, never `pkill -x dogear`.

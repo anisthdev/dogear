@@ -64,7 +64,7 @@ file(GLOB_RECURSE READER_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     CONFIGURE_DEPENDS reader/*.html reader/*.js reader/*.css)
 qt_add_resources(dogear reader PREFIX / FILES ${READER_FILES})
 
-qt_add_shaders(dogear "shaders" PREFIX / FILES shaders/pagecurl.frag)
+qt_add_shaders(dogear "shaders" PREFIX / FILES shaders/pagecurl.frag shaders/bookcase.frag shaders/bookpage.frag)
 
 target_include_directories(dogear PRIVATE src)
 target_compile_definitions(dogear PRIVATE DOGEAR_VERSION="${PROJECT_VERSION}")
