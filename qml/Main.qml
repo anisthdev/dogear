@@ -40,6 +40,10 @@ Window {
         ["s  S", "Next, previous sort"],
         ["v", "Covers or list"],
         ["z", "Series stacked or not"],
+        ["]  [", "Next, previous section"],
+        ["c", "Move to the other section (Academic, Non-academic)"],
+        ["C", "Section as the tags say"],
+        ["x", "Forget progress (leaves Continue reading)"],
         ["Space", "Select"],
         ["e", "Series of the selection or this book"],
         ["T", "Tags of the selection or this book"],
@@ -126,6 +130,8 @@ Window {
     }
 
     function handleKey(e) {
+        if (confirmDialog.open)
+            return confirmDialog.handleKey(e);
         if (inputDialog.open)
             return inputDialog.handleKey(e);
         if (definition.open)
@@ -391,6 +397,7 @@ Window {
         onToast: message => win.toast(message)
         onKeysBack: keyCatcher.forceActiveFocus()
         dialog: inputDialog
+        confirm: confirmDialog
         tagPanel: tagPanel
     }
 
@@ -628,6 +635,10 @@ Window {
 
         onToast: message => win.toast(message)
         onKeysBack: win.mode === "reader" ? reader.focusPage() : keyCatcher.forceActiveFocus()
+    }
+
+    ConfirmDialog {
+        id: confirmDialog
     }
 
     InputDialog {

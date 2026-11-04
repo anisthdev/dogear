@@ -44,6 +44,7 @@ qt_add_qml_module(dogear
         qml/views/MatchPanel.qml
         qml/views/DefinitionCard.qml
         qml/components/InputDialog.qml
+        qml/components/ConfirmDialog.qml
         qml/components/TextButton.qml
         qml/views/LibraryView.qml
         qml/components/Cover.qml

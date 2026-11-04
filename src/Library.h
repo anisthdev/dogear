@@ -33,7 +33,8 @@ class Library : public QObject
     // Every book whose file is there: { id, path, title, authors,
     // authorsSort, series, seriesIndex, language, description, publisher,
     // published, isbn, cover, fraction, addedAt, openedAt, seriesSource
-    // ("user", "book", "folder" or ""), tags }. The series is the user's
+    // ("user", "book", "folder" or ""), tags, category ("academic" |
+    // "nonacademic"), categoryFrom ("user" | "guess") }. The series is the user's
     // if set, else the EPUB's, else the folder's.
     Q_PROPERTY(QVariantList books READ books NOTIFY booksChanged)
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
@@ -59,6 +60,9 @@ public:
     // The most recently opened book's path that still exists, or ""
     Q_INVOKABLE QString lastBook() const;
     Q_INVOKABLE void saveProgress(const QString &id, const QString &position, double fraction);
+    // Forget where one was in books: as if never opened (highlights and
+    // bookmarks stay)
+    Q_INVOKABLE void resetProgress(const QStringList &ids);
     // What the page found, for books the scan couldn't read
     Q_INVOKABLE void saveDetails(const QString &id, const QString &title, const QString &authors);
     // Copy files (paths or file:// URLs) into the first folder; how many
@@ -88,6 +92,9 @@ public:
     // A book's tags become exactly these; its own (from the EPUB) that are
     // left out are marked removed, so a rescan doesn't bring them back
     Q_INVOKABLE void setTags(const QString &id, const QStringList &tags);
+    // The library section of books: "academic", "nonacademic", or "" to go
+    // back to the guess from their tags
+    Q_INVOKABLE void setCategory(const QStringList &ids, const QString &category);
 
     // A book's highlights and bookmarks, in reading order: { id, kind,
     // cfi, color, style, text, note, chapter, fraction, created, updated }

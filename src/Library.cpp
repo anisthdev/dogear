@@ -157,6 +157,26 @@ void Library::watch()
         m_watcher.addPaths(add);
 }
 
+// A book's section from its tags. Fiction wins over a study tag (1984 is
+// tagged both "Academic" and "Fiction"); with neither, it's non-academic.
+static QString guessCategory(const QStringList &tags)
+{
+    static const QRegularExpression fiction(
+        R"(fiction|fantasy|dystopia|myster|romance|thriller|horror|young readers|juvenile|novel|poetry|humou?r|comics?|graphic novel|short stories|classics)",
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression academic(
+        R"(academic|textbook|comput|programming|software|engineering|database|mathemat|physics|chemistry|biology|science|business|economics|psycholog|philosoph|history|management|law\b|medicine|statistic)",
+        QRegularExpression::CaseInsensitiveOption);
+    bool study = false;
+    for (const QString &t : tags) {
+        if (fiction.match(t).hasMatch())
+            return "nonacademic";
+        if (academic.match(t).hasMatch())
+            study = true;
+    }
+    return study ? "academic" : "nonacademic";
+}
+
 void Library::reload()
 {
     QSqlQuery q(m_db);
@@ -178,7 +198,7 @@ void Library::reload()
                      CASE WHEN user_series IS NOT NULL THEN 'user'
                           WHEN nullif(series, '') IS NOT NULL THEN 'book'
                           WHEN folder_series IS NOT NULL THEN 'folder' ELSE '' END,
-                     online_status, online_key
+                     online_status, online_key, user_category
               FROM books WHERE missing = 0)");
     // Details from elsewhere: book -> field -> source -> value
     QHash<QString, QHash<QString, QHash<QString, QString>>> fields;
@@ -243,6 +263,8 @@ void Library::reload()
             {"openedAt", q.value(15).isNull() ? 0 : q.value(15).toLongLong()},
             {"seriesSource", q.value(5).toString().isEmpty() ? QString() : q.value(16).toString()},
             {"tags", tags.value(q.value(0).toString())},
+            {"category", q.value(19).toString().isEmpty() ? guessCategory(tags.value(q.value(0).toString())) : q.value(19).toString()},
+            {"categoryFrom", q.value(19).toString().isEmpty() ? "guess" : "user"},
         });
     }
     m_books = books;
@@ -365,6 +387,17 @@ void Library::skipOnline(const QString &id)
     m_online->skip(id);
 }
 
+void Library::resetProgress(const QStringList &ids)
+{
+    for (const QString &id : ids) {
+        QSqlQuery q(m_db);
+        q.prepare("UPDATE books SET position = NULL, fraction = 0, opened_at = NULL WHERE id = ?");
+        q.addBindValue(id);
+        q.exec();
+    }
+    reload();
+}
+
 void Library::saveDetails(const QString &id, const QString &title, const QString &authors)
 {
     QSqlQuery q(m_db);
@@ -394,6 +427,18 @@ void Library::resetSeries(const QStringList &ids)
     for (const QString &id : ids) {
         QSqlQuery q(m_db);
         q.prepare("UPDATE books SET user_series = NULL, user_series_index = NULL WHERE id = ?");
+        q.addBindValue(id);
+        q.exec();
+    }
+    reload();
+}
+
+void Library::setCategory(const QStringList &ids, const QString &category)
+{
+    for (const QString &id : ids) {
+        QSqlQuery q(m_db);
+        q.prepare("UPDATE books SET user_category = ? WHERE id = ?");
+        q.addBindValue(category == "academic" || category == "nonacademic" ? QVariant(category) : QVariant(QMetaType::fromType<QString>()));
         q.addBindValue(id);
         q.exec();
     }

@@ -295,12 +295,11 @@ Item {
                                     if (!b)
                                         return "";
                                     if (b.onlineKey)
-                                        return `${b.online === "isbn" ? "Matched by ISBN" : "Matched by hand"} on ${root.sourceName("online")} · f change · u forget`;
+                                        return `${b.online === "isbn" ? "Matched by ISBN" : "Matched by hand"} on ${root.sourceName("online")}`;
                                     return {
                                         pending: "Looking it up…",
-                                        error: "Couldn't reach the web · f to try",
-                                        skipped: "Not matched online · f to find it"
-                                    }[b.online] ?? "Not matched online · f to find it";
+                                        error: "Couldn't reach the web"
+                                    }[b.online] ?? "Not matched online";
                                 }
                             }
                         }

@@ -26,6 +26,7 @@ Item {
 
     // Set by the window: the dialog for series and tags, the tag picker
     property InputDialog dialog
+    property ConfirmDialog confirm
     property TagPanel tagPanel
 
     Settings {
@@ -66,21 +67,22 @@ Item {
         })
     readonly property var bySeriesOrder: (a, b) => ((a.seriesIndex || 1e9) - (b.seriesIndex || 1e9)) || byTitle(a, b)
 
-    // What's shown: books, and stacks standing for a series. A stack looks
-    // like a book to the sort: its latest reading and adding, its series
-    // name as title, the book to read next as cover.
-    readonly property var items: {
-        const words = input.text.toLowerCase().split(/\s+/).filter(Boolean);
+    // The books the filter and tag let through
+    readonly property var words: input.text.toLowerCase().split(/\s+/).filter(Boolean)
+    readonly property var filtered: {
         const tag = root.tag.toLowerCase();
-        let books = Library.books.filter(b => {
+        return Library.books.filter(b => {
             if (tag && !b.tags.some(t => t.toLowerCase() === tag))
                 return false;
             const hay = `${b.title} ${b.authors} ${b.series}`.toLowerCase();
             return words.every(w => hay.includes(w));
         });
-        if (openSeries)
-            return books.filter(b => b.series === openSeries).sort(bySeriesOrder);
+    }
 
+    // Books as shown in a section: series of two or more as one stack (a
+    // stack looks like a book to the sort: its latest reading and adding,
+    // its series name as title, the book to read next as cover), sorted
+    function stacked(books) {
         let list = books;
         if (prefs.stacks && words.length === 0) {
             const groups = new Map();
@@ -108,6 +110,7 @@ Item {
                     cover: next.cover,
                     next: next,
                     books: members,
+                    category: members[0].category,
                     openedAt: Math.max(...members.map(b => b.openedAt)),
                     addedAt: Math.max(...members.map(b => b.addedAt)),
                     fraction: members.reduce((s, b) => s + b.fraction, 0) / members.length,
@@ -128,51 +131,232 @@ Item {
         return list.slice().sort(compare);
     }
 
-    readonly property var view: grid ? gridView : listView
-    readonly property var current: items[view.currentIndex] ?? null
+    readonly property var categories: [["academic", "Academic"], ["nonacademic", "Non-academic"]]
 
-    onItemsChanged: Qt.callLater(restoreCurrent)
+    // What's shown, top to bottom: { key, title, row (one sideways row),
+    // items }. Continue reading (books started, not finished, latest
+    // first; they show in their own section too), then a section per
+    // category. Inside a series: just its books.
+    readonly property var sections: {
+        if (openSeries)
+            return [{
+                    key: "series",
+                    title: openSeries,
+                    row: false,
+                    items: filtered.filter(b => b.series === openSeries).sort(bySeriesOrder)
+                }];
+        const out = [];
+        const reading = filtered.filter(b => b.fraction > 0 && b.fraction < 0.995).sort((a, b) => b.openedAt - a.openedAt);
+        if (reading.length)
+            out.push({
+                key: "continue",
+                title: "Continue reading",
+                row: true,
+                items: reading
+            });
+        for (const [key, title] of categories) {
+            const items = stacked(filtered.filter(b => b.category === key));
+            if (items.length)
+                out.push({
+                    key: key,
+                    title: title,
+                    row: false,
+                    items: items
+                });
+        }
+        return out;
+    }
+
+    // Every place the cursor can be, in order: { sec, idx, item, key }
+    readonly property var slots: {
+        const out = [];
+        sections.forEach((s, sec) => s.items.forEach((item, idx) => out.push({
+                        sec: sec,
+                        idx: idx,
+                        item: item,
+                        key: `${s.key}:${item.id}`
+                    })));
+        return out;
+    }
+    readonly property var sectionStart: {
+        const out = [];
+        let n = 0;
+        for (const s of sections) {
+            out.push(n);
+            n += s.items.length;
+        }
+        return out;
+    }
+
+    property int cursor: 0
+    // The slot under the cursor, kept across re-sorts, filters and rescans
+    property string currentKey: ""
+    readonly property var current: slots[cursor]?.item ?? null
+
+    // As many columns as fit at ~180px, filling the width
+    readonly property int columns: Math.max(2, Math.floor(flick.width / 180))
+    readonly property real cellWidth: Math.floor(flick.width / columns)
+
+    onSlotsChanged: Qt.callLater(restoreCurrent)
     onGridChanged: Qt.callLater(restoreCurrent)
 
     function restoreCurrent() {
-        let i = items.findIndex(b => b.id === currentId);
+        let i = slots.findIndex(s => s.key === currentKey);
+        const id = currentKey.slice(currentKey.indexOf(":") + 1);
+        if (i < 0)
+            i = slots.findIndex(s => s.item.id === id);
         // A book read inside a stack: the stack
         if (i < 0)
-            i = items.findIndex(b => b.isSeries && b.books.some(m => m.id === currentId));
-        if (i < 0)
-            i = 0;
-        view.currentIndex = i;
-        view.positionViewAtIndex(i, ListView.Contain);
+            i = slots.findIndex(s => s.item.isSeries && s.item.books.some(m => m.id === id));
+        setCurrent(Math.max(0, i));
     }
 
-    // Every book shown, a stack's in its order (QML's JS has no flatMap)
+    // Every book shown once, in order, a stack's in its own (QML's JS has
+    // no flatMap); Continue reading's are in their sections too
     function allBooks() {
         const out = [];
-        for (const it of items) {
-            if (it.isSeries)
-                for (const b of it.books)
-                    out.push(b);
-            else
-                out.push(it);
+        const seen = {};
+        for (const s of sections) {
+            if (s.key === "continue")
+                continue;
+            for (const it of s.items)
+                for (const b of (it.isSeries ? it.books : [it]))
+                    if (!seen[b.id]) {
+                        seen[b.id] = true;
+                        out.push(b);
+                    }
         }
         return out;
     }
 
     function setCurrent(i) {
-        if (items.length === 0)
+        if (slots.length === 0)
             return;
-        i = Math.max(0, Math.min(items.length - 1, i));
-        view.currentIndex = i;
-        currentId = items[i].id;
+        cursor = Math.max(0, Math.min(slots.length - 1, i));
+        currentKey = slots[cursor].key;
     }
 
-    function move(by) {
-        setCurrent(view.currentIndex + by);
+    function goTo(sec, idx) {
+        setCurrent(sectionStart[sec] + Math.max(0, Math.min(sections[sec].items.length - 1, idx)));
     }
 
-    // Select a book by id (after reading it, say)
+    // Columns of a section (a sideways row has no rows)
+    function colsOf(sec) {
+        return !grid ? 1 : sections[sec].row ? 1e9 : columns;
+    }
+
+    // h / l: along a row of covers; nothing in the list
+    function horizontal(d) {
+        const s = slots[cursor];
+        if (!s || !grid)
+            return;
+        goTo(s.sec, s.idx + d);
+    }
+
+    // j / k: a row down or up, into the next or previous section at the
+    // same column
+    function vertical(d) {
+        const s = slots[cursor];
+        if (!s)
+            return;
+        const n = sections[s.sec].items.length;
+        const c = colsOf(s.sec);
+        const col = c >= 1e9 ? Math.min(s.idx, columns - 1) : s.idx % c;
+        if (c < 1e9) {
+            const next = s.idx + d * c;
+            if (next >= 0 && next < n)
+                return goTo(s.sec, next);
+            // Into a shorter last row
+            if (d > 0 && Math.floor((n - 1) / c) > Math.floor(s.idx / c))
+                return goTo(s.sec, n - 1);
+        }
+        const ts = s.sec + d;
+        if (ts < 0 || ts >= sections.length)
+            return;
+        const tn = sections[ts].items.length;
+        const tc = colsOf(ts);
+        if (d > 0 || tc >= 1e9)
+            goTo(ts, Math.min(col, tn - 1));
+        else
+            goTo(ts, Math.min(Math.floor((tn - 1) / tc) * tc + col, tn - 1));
+    }
+
+    function jumpSection(d) {
+        const s = slots[cursor];
+        if (!s)
+            return;
+        const ts = Math.max(0, Math.min(sections.length - 1, s.sec + d));
+        goTo(ts, 0);
+    }
+
+    // Keep an item in view as the cursor reaches it
+    function reveal(item) {
+        const p = item.mapToItem(column, 0, 0);
+        const top = p.y - (item.headerRoom ?? 0);
+        if (top < flick.contentY)
+            flick.contentY = Math.max(0, top - 8);
+        else if (p.y + item.height > flick.contentY + flick.height)
+            flick.contentY = Math.min(Math.max(0, column.implicitHeight - flick.height + 24), p.y + item.height - flick.height + 16);
+    }
+
+    function ago(secs) {
+        if (!secs)
+            return "";
+        const d = Date.now() / 1000 - secs;
+        if (d < 60)
+            return "just now";
+        if (d < 3600)
+            return `${Math.round(d / 60)} min ago`;
+        if (d < 86400)
+            return `${Math.round(d / 3600)} h ago`;
+        if (d < 2 * 86400)
+            return "yesterday";
+        if (d < 30 * 86400)
+            return `${Math.round(d / 86400)} days ago`;
+        return new Date(secs * 1000).toLocaleDateString(Qt.locale(), Locale.ShortFormat);
+    }
+
+    function finished(b) {
+        return b.isSeries ? b.finished === b.books.length : b.fraction >= 0.995;
+    }
+
+    // x: forget progress in the selection (or this book, or a stack's
+    // books), after asking; they leave Continue reading
+    function resetProgress() {
+        const books = targets().filter(b => b.fraction > 0 || b.openedAt > 0);
+        if (books.length === 0) {
+            toast("Not started yet");
+            return;
+        }
+        const what = books.length === 1 ? `“${books[0].title}”` : `${books.length} books`;
+        confirm.ask("Forget progress?", `${what} will start from the beginning and leave Continue reading. Highlights and bookmarks stay.`, "Forget", () => {
+            Library.resetProgress(books.map(b => b.id));
+            selected = {};
+            toast(books.length === 1 ? "Progress forgotten" : `Progress forgotten in ${books.length} books`);
+        });
+    }
+
+    // c: the selection (or this book, or a stack's books) into the other
+    // section; C: back to the guess from their tags
+    function toggleCategory(reset) {
+        const books = targets();
+        if (books.length === 0)
+            return;
+        const ids = books.map(b => b.id);
+        if (reset) {
+            Library.setCategory(ids, "");
+            toast("Section as their tags say");
+        } else {
+            const to = books.every(b => b.category === "academic") ? "nonacademic" : "academic";
+            Library.setCategory(ids, to);
+            toast(`${books.length === 1 ? `“${books[0].title}”` : `${books.length} books`} in ${to === "academic" ? "Academic" : "Non-academic"}`);
+        }
+        selected = {};
+    }
+
+    // Select a book by id (after reading it, say): where it first shows
     function select(id) {
-        currentId = id;
+        currentKey = `:${id}`;
         restoreCurrent();
     }
 
@@ -226,7 +410,7 @@ Item {
                 delete s[id];
         }
         selected = s;
-        move(1);
+        setCurrent(cursor + 1);
     }
 
     function isSelected(it) {
@@ -302,8 +486,11 @@ Item {
     function handleKey(e) {
         const t = e.text;
         const ctrl = e.modifiers & Qt.ControlModifier;
-        const cols = grid ? gridView.columns : 1;
-        const rows = Math.max(1, Math.floor(view.height / (grid ? gridView.cellHeight : 64)));
+        const rows = Math.max(1, Math.floor(flick.height / (grid ? cellWidth * 1.5 + 80 : 64)));
+        const repeat = (n, d) => {
+            for (let k = 0; k < n; ++k)
+                vertical(d);
+        };
 
         if (t === "g" && !ctrl) {
             if (pendingG) {
@@ -320,24 +507,21 @@ Item {
         if (ctrl) {
             switch (e.key) {
             case Qt.Key_D:
-                move(cols * Math.max(1, Math.floor(rows / 2)));
+                repeat(Math.max(1, Math.floor(rows / 2)), 1);
                 return true;
             case Qt.Key_U:
-                move(-cols * Math.max(1, Math.floor(rows / 2)));
-                return true;
-            case Qt.Key_F:
-                move(cols * rows);
+                repeat(Math.max(1, Math.floor(rows / 2)), -1);
                 return true;
             case Qt.Key_B:
-                move(-cols * rows);
+                repeat(rows, -1);
                 return true;
             case Qt.Key_N:
             case Qt.Key_J:
-                move(cols);
+                vertical(1);
                 return true;
             case Qt.Key_P:
             case Qt.Key_K:
-                move(-cols);
+                vertical(-1);
                 return true;
             }
             return false;
@@ -345,23 +529,28 @@ Item {
 
         switch (t) {
         case "j":
-            move(cols);
+            vertical(1);
             return true;
         case "k":
-            move(-cols);
+            vertical(-1);
             return true;
         case "h":
-            if (grid)
-                move(-1);
+            horizontal(-1);
             return true;
         case "l":
             if (grid)
-                move(1);
+                horizontal(1);
             else
                 openCurrent();
             return true;
+        case "]":
+            jumpSection(1);
+            return true;
+        case "[":
+            jumpSection(-1);
+            return true;
         case "G":
-            setCurrent(items.length - 1);
+            setCurrent(slots.length - 1);
             return true;
         case "o":
             openCurrent();
@@ -389,6 +578,15 @@ Item {
             if (!prefs.stacks && openSeries)
                 openSeries = "";
             toast(prefs.stacks ? "Series stacked" : "Every book on its own");
+            return true;
+        case "c":
+            toggleCategory(false);
+            return true;
+        case "x":
+            resetProgress();
+            return true;
+        case "C":
+            toggleCategory(true);
             return true;
         case " ":
             toggleSelected();
@@ -424,30 +622,28 @@ Item {
                 leaveSeries();
             return true;
         case Qt.Key_Down:
-            move(cols);
+            vertical(1);
             return true;
         case Qt.Key_Up:
-            move(-cols);
+            vertical(-1);
             return true;
         case Qt.Key_Left:
-            if (grid)
-                move(-1);
+            horizontal(-1);
             return true;
         case Qt.Key_Right:
-            if (grid)
-                move(1);
+            horizontal(1);
             return true;
         case Qt.Key_PageDown:
-            move(cols * rows);
+            repeat(rows, 1);
             return true;
         case Qt.Key_PageUp:
-            move(-cols * rows);
+            repeat(rows, -1);
             return true;
         case Qt.Key_Home:
             setCurrent(0);
             return true;
         case Qt.Key_End:
-            setCurrent(items.length - 1);
+            setCurrent(slots.length - 1);
             return true;
         case Qt.Key_Escape:
             // One thing at a time: selection, filter, tag, series
@@ -539,7 +735,7 @@ Item {
         anchors.bottomMargin: 6
         anchors.verticalCenter: undefined
         text: {
-            const books = root.items.reduce((n, it) => n + (it.isSeries ? it.books.length : 1), 0);
+            const books = root.allBooks().length;
             const total = Library.books.length;
             const parts = [];
             if (root.selectedCount)
@@ -614,9 +810,9 @@ Item {
                 } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     root.keysBack();
                 } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab || (ctrl && (event.key === Qt.Key_J || event.key === Qt.Key_N))) {
-                    root.move(root.grid ? gridView.columns : 1);
+                    root.vertical(1);
                 } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab || (ctrl && (event.key === Qt.Key_K || event.key === Qt.Key_P))) {
-                    root.move(root.grid ? -gridView.columns : -1);
+                    root.vertical(-1);
                 } else {
                     return;
                 }
@@ -651,6 +847,304 @@ Item {
         }
     }
 
+    readonly property real bigWidth: Math.min(260, Math.round(cellWidth * 1.3))
+
+    // A tick on finished books
+    component Finished: Rectangle {
+        width: finishedLabel.implicitWidth + 14
+        height: 22
+        radius: 11
+        color: Qt.alpha(Theme.surface, 0.88)
+
+        Label {
+            id: finishedLabel
+
+            anchors.centerIn: parent
+            text: "✓ Read"
+            color: Theme.primary
+            font.pixelSize: 11
+        }
+    }
+
+    // A book or stack as a cover, in a grid or the Continue reading row
+    component BookCell: Item {
+        id: cell
+
+        required property var modelData
+        required property int index
+        property int base: 0
+        property bool big: false
+        // Room above it for a section heading, kept in view with it
+        property real headerRoom: 0
+        readonly property int slot: base + index
+        readonly property bool current: root.cursor === slot
+        readonly property bool stack: !!modelData.isSeries
+        // A stack's cover sits lower and narrower, two cards behind it
+        readonly property int lift: stack ? 8 : 0
+
+        width: big ? root.bigWidth : root.cellWidth
+        height: Math.round((width - 20) * 1.5) + 86
+
+        // After the layout has caught up
+        Timer {
+            id: revealLater
+
+            interval: 0
+            onTriggered: root.reveal(cell)
+        }
+
+        onCurrentChanged: if (current)
+            revealLater.restart()
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 2
+            radius: Theme.cardRadius
+            color: cell.current ? Theme.secondary_container : "transparent"
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: Theme.animFast
+                }
+            }
+        }
+
+        // Behind a stack's cover, the series' next two, dimmed
+        Repeater {
+            model: cell.stack ? cell.modelData.books.filter(b => b.id !== cell.modelData.next.id).slice(0, 2).reverse() : []
+
+            Item {
+                id: behind
+
+                required property var modelData
+                required property int index
+                readonly property int depth: cell.modelData.books.length > 2 ? 2 - index : 1
+
+                x: cover.x + depth * cell.lift
+                y: cover.y - depth * cell.lift
+                width: cover.width
+                height: cover.height
+
+                Cover {
+                    anchors.fill: parent
+                    source: behind.modelData.cover
+                    title: ""
+                    authors: ""
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 8
+                    color: Qt.alpha(Theme.surface, 0.25 + 0.2 * behind.depth)
+                    border.width: 1
+                    border.color: Qt.alpha(Theme.outline, 0.5)
+                }
+            }
+        }
+
+        Cover {
+            id: cover
+
+            x: 10
+            y: 10 + 2 * cell.lift
+            width: cell.width - 20 - 2 * cell.lift
+            height: Math.round((cell.width - 20) * 1.5) - 2 * cell.lift
+            source: cell.modelData.cover
+            title: cell.modelData.isSeries ? cell.modelData.next.title : cell.modelData.title
+            authors: cell.modelData.authors
+        }
+
+        Check {
+            anchors.right: cover.right
+            anchors.top: cover.top
+            anchors.margins: -6
+            visible: root.isSelected(cell.modelData)
+        }
+
+        Finished {
+            anchors.left: cover.left
+            anchors.bottom: cover.bottom
+            anchors.margins: 6
+            visible: root.finished(cell.modelData)
+        }
+
+        // How far through, along the cover's foot
+        LinearProgress {
+            anchors.left: cover.left
+            anchors.right: cover.right
+            anchors.top: cover.bottom
+            anchors.topMargin: 4
+            visible: cell.modelData.fraction > 0 && !root.finished(cell.modelData)
+            thickness: 3
+            progress: cell.modelData.fraction
+            color: Theme.primary
+            trackColor: cell.current ? Qt.alpha(Theme.on_secondary_container, 0.15) : Theme.surface_container_highest
+        }
+
+        Column {
+            anchors.left: cover.left
+            anchors.right: parent.right
+            anchors.rightMargin: 10
+            anchors.top: cover.bottom
+            anchors.topMargin: 16
+            spacing: 2
+
+            Label {
+                anchors.verticalCenter: undefined
+                width: parent.width
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                text: cell.modelData.title
+                color: cell.current ? Theme.on_secondary_container : Theme.on_surface
+                font.pixelSize: cell.big ? 14 : 13
+                font.weight: cell.stack ? Theme.titleWeight : Font.Medium
+            }
+
+            Label {
+                anchors.verticalCenter: undefined
+                width: parent.width
+                elide: Text.ElideRight
+                // In Continue reading: how far, and when
+                text: cell.big ? [root.percent(cell.modelData), root.ago(cell.modelData.openedAt)].filter(Boolean).join(" · ") : root.subtitle(cell.modelData)
+                color: cell.current ? Qt.alpha(Theme.on_secondary_container, 0.8) : Theme.on_surface_variant
+                font.pixelSize: 12
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.setCurrent(cell.slot)
+            onDoubleClicked: {
+                root.setCurrent(cell.slot);
+                root.openCurrent();
+            }
+        }
+    }
+
+    // A book or stack as a row of the list
+    component BookRow: Rectangle {
+        id: row
+
+        required property var modelData
+        required property int index
+        property int base: 0
+        property real headerRoom: 0
+        readonly property int slot: base + index
+        readonly property bool current: root.cursor === slot
+
+        width: parent?.width ?? 0
+        height: 62
+        radius: Theme.radius
+        color: current ? Theme.secondary_container : Theme.surface_container_low
+
+        // After the layout has caught up
+        Timer {
+            id: revealLater
+
+            interval: 0
+            onTriggered: root.reveal(row)
+        }
+
+        onCurrentChanged: if (current)
+            revealLater.restart()
+
+        Behavior on color {
+            ColorAnimation {
+                duration: Theme.animFast
+            }
+        }
+
+        // A stack's thumbnail has a card behind it
+        Rectangle {
+            visible: !!row.modelData.isSeries
+            x: thumb.x + 4
+            y: thumb.y - 4
+            width: thumb.width
+            height: thumb.height
+            radius: 4
+            color: Theme.surface_container_highest
+            border.width: 1
+            border.color: Theme.outline_variant
+        }
+
+        Cover {
+            id: thumb
+
+            x: 12
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: row.modelData.isSeries ? 2 : 0
+            height: 48
+            width: 32
+            radius: 4
+            source: row.modelData.cover
+            title: ""
+            authors: ""
+        }
+
+        Check {
+            anchors.right: thumb.right
+            anchors.top: thumb.top
+            anchors.margins: -8
+            scale: 0.8
+            visible: root.isSelected(row.modelData)
+        }
+
+        Column {
+            anchors.left: thumb.right
+            anchors.leftMargin: 20
+            anchors.right: rowPercent.left
+            anchors.rightMargin: 16
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+
+            Label {
+                anchors.verticalCenter: undefined
+                width: parent.width
+                elide: Text.ElideRight
+                text: row.modelData.title
+                color: row.current ? Theme.on_secondary_container : Theme.on_surface
+                font.pixelSize: 14
+                font.weight: row.modelData.isSeries ? Theme.titleWeight : Font.Medium
+            }
+
+            Label {
+                anchors.verticalCenter: undefined
+                width: parent.width
+                elide: Text.ElideRight
+                text: {
+                    const b = row.modelData;
+                    if (b.isSeries)
+                        return b.authors;
+                    const series = b.series && !root.openSeries ? `${b.series}${b.seriesIndex ? " #" + b.seriesIndex : ""}` : "";
+                    const place = root.openSeries && b.seriesIndex ? `#${b.seriesIndex}` : "";
+                    return [place, b.authors, series].filter(Boolean).join(" · ");
+                }
+                color: row.current ? Qt.alpha(Theme.on_secondary_container, 0.8) : Theme.on_surface_variant
+                font.pixelSize: 12
+            }
+        }
+
+        Label {
+            id: rowPercent
+
+            anchors.right: parent.right
+            anchors.rightMargin: 18
+            text: root.finished(row.modelData) && !row.modelData.isSeries ? "✓ Read" : root.percent(row.modelData)
+            color: row.current ? Theme.on_secondary_container : root.finished(row.modelData) ? Theme.primary : Theme.on_surface_variant
+            font.pixelSize: 12
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.setCurrent(row.slot)
+            onDoubleClicked: {
+                root.setCurrent(row.slot);
+                root.openCurrent();
+            }
+        }
+    }
+
     Item {
         id: content
 
@@ -662,276 +1156,174 @@ Item {
         anchors.leftMargin: 16
         anchors.rightMargin: 16
 
-        GridView {
-            id: gridView
-
-            // As many columns as fit at ~180px, filling the width
-            readonly property int columns: Math.max(2, Math.floor(width / 180))
+        Flickable {
+            id: flick
 
             anchors.fill: parent
-            visible: root.grid
+            contentHeight: column.implicitHeight + 24
             clip: true
-            model: root.grid ? root.items : []
-            cellWidth: Math.floor(width / columns)
-            cellHeight: Math.round((cellWidth - 20) * 1.5) + 86
-            highlightMoveDuration: 0
             boundsBehavior: Flickable.StopAtBounds
-            bottomMargin: 16
-            keyNavigationEnabled: false
 
-            delegate: Item {
-                id: cell
-
-                required property var modelData
-                required property int index
-                readonly property bool current: GridView.isCurrentItem && root.grid
-                readonly property bool stack: !!modelData.isSeries
-                // A stack's cover sits lower and narrower, two cards behind it
-                readonly property int lift: stack ? 8 : 0
-
-                width: GridView.view.cellWidth
-                height: GridView.view.cellHeight
-
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: 2
-                    radius: Theme.cardRadius
-                    color: cell.current ? Theme.secondary_container : "transparent"
-
-                    Behavior on color {
-                        ColorAnimation {
-                            duration: Theme.animFast
-                        }
-                    }
+            Behavior on contentY {
+                NumberAnimation {
+                    duration: Theme.animNormal
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Theme.emphasizedDecel
                 }
+            }
 
-                // Behind a stack's cover, the series' next two, dimmed
+            Column {
+                id: column
+
+                width: flick.width
+                spacing: 10
+
                 Repeater {
-                    model: cell.stack ? cell.modelData.books.filter(b => b.id !== cell.modelData.next.id).slice(0, 2).reverse() : []
+                    model: root.sections
 
-                    Item {
-                        id: behind
+                    Column {
+                        id: section
 
                         required property var modelData
                         required property int index
-                        readonly property int depth: cell.modelData.books.length > 2 ? 2 - index : 1
+                        readonly property int base: root.sectionStart[index] ?? 0
+                        readonly property bool sideways: root.grid && modelData.row
 
-                        x: cover.x + depth * cell.lift
-                        y: cover.y - depth * cell.lift
-                        width: cover.width
-                        height: cover.height
+                        width: column.width
+                        spacing: 6
 
-                        Cover {
-                            anchors.fill: parent
-                            source: behind.modelData.cover
-                            title: ""
-                            authors: ""
+                        // The section's name and size (not inside a series:
+                        // the header names it)
+                        Row {
+                            visible: section.modelData.key !== "series"
+                            x: 12
+                            topPadding: section.index === 0 ? 0 : 18
+                            spacing: 10
+
+                            Label {
+                                anchors.verticalCenter: undefined
+                                text: section.modelData.title
+                                color: Theme.on_surface
+                                font.pixelSize: 17
+                                font.weight: Theme.titleWeight
+                                roundness: Theme.titleRoundness
+                            }
+
+                            Label {
+                                anchors.verticalCenter: undefined
+                                anchors.baseline: parent.children[0].baseline
+                                text: {
+                                    let n = 0;
+                                    for (const it of section.modelData.items)
+                                        n += it.isSeries ? it.books.length : 1;
+                                    return n;
+                                }
+                                color: Theme.on_surface_variant
+                                font.pixelSize: 13
+                            }
                         }
 
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 8
-                            color: Qt.alpha(Theme.surface, 0.25 + 0.2 * behind.depth)
-                            border.width: 1
-                            border.color: Qt.alpha(Theme.outline, 0.5)
+                        // Continue reading: one row of bigger covers
+                        ListView {
+                            id: shelf
+
+                            visible: section.sideways
+                            width: section.width
+                            height: visible ? Math.round((root.bigWidth - 20) * 1.5) + 86 : 0
+                            orientation: ListView.Horizontal
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            model: visible ? section.modelData.items : []
+                            interactive: contentWidth > width
+                            highlightFollowsCurrentItem: false
+                            readonly property int at: {
+                                const s = root.slots[root.cursor];
+                                return s && s.sec === section.index ? s.idx : -1;
+                            }
+                            // Sideways only as far as it takes to show the
+                            // cursor: where ListView would put it, eased to
+                            onAtChanged: {
+                                if (at < 0)
+                                    return;
+                                const from = contentX;
+                                slide.stop();
+                                positionViewAtIndex(at, ListView.Contain);
+                                const to = contentX;
+                                if (Math.abs(to - from) < 1)
+                                    return;
+                                contentX = from;
+                                slide.from = from;
+                                slide.to = to;
+                                slide.start();
+                            }
+                            // Laid out (or out again): straight to the cursor,
+                            // else the start
+                            function place() {
+                                slide.stop();
+                                if (at >= 0)
+                                    positionViewAtIndex(at, ListView.Contain);
+                                else
+                                    positionViewAtBeginning();
+                            }
+                            onWidthChanged: Qt.callLater(place)
+                            onContentWidthChanged: Qt.callLater(place)
+                            onModelChanged: Qt.callLater(place)
+
+                            NumberAnimation {
+                                id: slide
+
+                                target: shelf
+                                property: "contentX"
+                                duration: Theme.animNormal
+                                easing.type: Easing.BezierSpline
+                                easing.bezierCurve: Theme.emphasizedDecel
+                            }
+
+                            delegate: BookCell {
+                                base: section.base
+                                big: true
+                                headerRoom: 44
+                            }
+                        }
+
+                        // A grid of covers
+                        Grid {
+                            visible: root.grid && !section.modelData.row
+                            columns: root.columns
+
+                            Repeater {
+                                model: parent.visible ? section.modelData.items : []
+
+                                BookCell {
+                                    base: section.base
+                                    headerRoom: index < root.columns ? 44 : 0
+                                }
+                            }
+                        }
+
+                        // The list
+                        Column {
+                            visible: !root.grid
+                            width: section.width
+                            spacing: 2
+
+                            Repeater {
+                                model: parent.visible ? section.modelData.items : []
+
+                                BookRow {
+                                    base: section.base
+                                    headerRoom: index === 0 ? 44 : 0
+                                }
+                            }
                         }
                     }
-                }
-
-                Cover {
-                    id: cover
-
-                    x: 10
-                    y: 10 + 2 * cell.lift
-                    width: cell.width - 20 - 2 * cell.lift
-                    height: Math.round((cell.width - 20) * 1.5) - 2 * cell.lift
-                    source: cell.modelData.cover
-                    title: cell.modelData.isSeries ? cell.modelData.next.title : cell.modelData.title
-                    authors: cell.modelData.authors
-                }
-
-                Check {
-                    anchors.right: cover.right
-                    anchors.top: cover.top
-                    anchors.margins: -6
-                    visible: root.isSelected(cell.modelData)
-                }
-
-                // How far through, along the cover's foot
-                LinearProgress {
-                    anchors.left: cover.left
-                    anchors.right: cover.right
-                    anchors.top: cover.bottom
-                    anchors.topMargin: 4
-                    visible: cell.modelData.fraction > 0
-                    thickness: 3
-                    progress: cell.modelData.fraction
-                    color: Theme.primary
-                    trackColor: cell.current ? Qt.alpha(Theme.on_secondary_container, 0.15) : Theme.surface_container_highest
-                }
-
-                Column {
-                    anchors.left: cover.left
-                    anchors.right: parent.right
-                    anchors.rightMargin: 10
-                    anchors.top: cover.bottom
-                    anchors.topMargin: 16
-                    spacing: 2
-
-                    Label {
-                        anchors.verticalCenter: undefined
-                        width: parent.width
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
-                        text: cell.modelData.title
-                        color: cell.current ? Theme.on_secondary_container : Theme.on_surface
-                        font.pixelSize: 13
-                        font.weight: cell.stack ? Theme.titleWeight : Font.Medium
-                    }
-
-                    Label {
-                        anchors.verticalCenter: undefined
-                        width: parent.width
-                        elide: Text.ElideRight
-                        text: root.subtitle(cell.modelData)
-                        color: cell.current ? Qt.alpha(Theme.on_secondary_container, 0.8) : Theme.on_surface_variant
-                        font.pixelSize: 12
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: root.setCurrent(cell.index)
-                    onDoubleClicked: root.openCurrent()
-                }
-            }
-        }
-
-        ListView {
-            id: listView
-
-            anchors.fill: parent
-            anchors.leftMargin: 4
-            anchors.rightMargin: 4
-            visible: !root.grid
-            clip: true
-            spacing: 2
-            model: root.grid ? [] : root.items
-            highlightMoveDuration: 0
-            boundsBehavior: Flickable.StopAtBounds
-            bottomMargin: 16
-            keyNavigationEnabled: false
-
-            delegate: Rectangle {
-                id: row
-
-                required property var modelData
-                required property int index
-                readonly property bool current: ListView.isCurrentItem && !root.grid
-
-                width: ListView.view.width
-                height: 62
-                radius: Theme.radius
-                color: current ? Theme.secondary_container : Theme.surface_container_low
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: Theme.animFast
-                    }
-                }
-
-                // A stack's thumbnail has a card behind it
-                Rectangle {
-                    visible: !!row.modelData.isSeries
-                    x: thumb.x + 4
-                    y: thumb.y - 4
-                    width: thumb.width
-                    height: thumb.height
-                    radius: 4
-                    color: Theme.surface_container_highest
-                    border.width: 1
-                    border.color: Theme.outline_variant
-                }
-
-                Cover {
-                    id: thumb
-
-                    x: 12
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: row.modelData.isSeries ? 2 : 0
-                    height: 48
-                    width: 32
-                    radius: 4
-                    source: row.modelData.cover
-                    title: ""
-                    authors: ""
-                }
-
-                Check {
-                    anchors.right: thumb.right
-                    anchors.top: thumb.top
-                    anchors.margins: -8
-                    scale: 0.8
-                    visible: root.isSelected(row.modelData)
-                }
-
-                Column {
-                    anchors.left: thumb.right
-                    anchors.leftMargin: 20
-                    anchors.right: rowPercent.left
-                    anchors.rightMargin: 16
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 3
-
-                    Label {
-                        anchors.verticalCenter: undefined
-                        width: parent.width
-                        elide: Text.ElideRight
-                        text: row.modelData.title
-                        color: row.current ? Theme.on_secondary_container : Theme.on_surface
-                        font.pixelSize: 14
-                        font.weight: row.modelData.isSeries ? Theme.titleWeight : Font.Medium
-                    }
-
-                    Label {
-                        anchors.verticalCenter: undefined
-                        width: parent.width
-                        elide: Text.ElideRight
-                        text: {
-                            const b = row.modelData;
-                            if (b.isSeries)
-                                return b.authors;
-                            const series = b.series && !root.openSeries ? `${b.series}${b.seriesIndex ? " #" + b.seriesIndex : ""}` : "";
-                            const place = root.openSeries && b.seriesIndex ? `#${b.seriesIndex}` : "";
-                            return [place, b.authors, series].filter(Boolean).join(" · ");
-                        }
-                        color: row.current ? Qt.alpha(Theme.on_secondary_container, 0.8) : Theme.on_surface_variant
-                        font.pixelSize: 12
-                    }
-                }
-
-                Label {
-                    id: rowPercent
-
-                    anchors.right: parent.right
-                    anchors.rightMargin: 18
-                    text: root.percent(row.modelData)
-                    color: row.current ? Theme.on_secondary_container : Theme.on_surface_variant
-                    font.pixelSize: 12
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: root.setCurrent(row.index)
-                    onDoubleClicked: root.openCurrent()
                 }
             }
         }
 
         Column {
             anchors.centerIn: parent
-            visible: root.items.length === 0 && !Library.scanning
+            visible: root.slots.length === 0 && !Library.scanning
             spacing: 8
 
             Label {

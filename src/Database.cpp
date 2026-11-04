@@ -123,6 +123,13 @@ bool migrate(QSqlDatabase &db)
         }
         q.exec("PRAGMA user_version = 6");
     }
+    if (version < 7) {
+        // The library's section, set by hand: 'academic' | 'nonacademic';
+        // NULL: guessed from the tags (Library::reload)
+        if (!q.exec("ALTER TABLE books ADD COLUMN user_category TEXT"))
+            return false;
+        q.exec("PRAGMA user_version = 7");
+    }
     return true;
 }
 
